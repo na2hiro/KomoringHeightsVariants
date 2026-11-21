@@ -34,17 +34,16 @@ struct RuleInfo {
 };
 
 inline constexpr std::array kRules{
-    RuleInfo{Rule::standard, "standard"},       RuleInfo{Rule::annan, "annan"},
-    RuleInfo{Rule::anhoku, "anhoku"},           RuleInfo{Rule::antouzai, "antouzai"},
-    RuleInfo{Rule::taimen, "taimen"},           RuleInfo{Rule::haimen, "haimen"},
-    RuleInfo{Rule::anki, "anki"},               RuleInfo{Rule::tenjiku, "tenjiku"},
-    RuleInfo{Rule::neko, "neko"},               RuleInfo{Rule::nekoneko, "nekoneko"},
-    RuleInfo{Rule::yokoneko, "yokoneko"},       RuleInfo{Rule::yokonekoneko, "yokonekoneko"},
+    RuleInfo{Rule::standard, "standard"}, RuleInfo{Rule::annan, "annan"},
+    RuleInfo{Rule::anhoku, "anhoku"},     RuleInfo{Rule::antouzai, "antouzai"},
+    RuleInfo{Rule::taimen, "taimen"},     RuleInfo{Rule::haimen, "haimen"},
+    RuleInfo{Rule::anki, "anki"},         RuleInfo{Rule::tenjiku, "tenjiku"},
+    RuleInfo{Rule::neko, "neko"},         RuleInfo{Rule::nekoneko, "nekoneko"},
+    RuleInfo{Rule::yokoneko, "yokoneko"}, RuleInfo{Rule::yokonekoneko, "yokonekoneko"},
     RuleInfo{Rule::tenkyo, "tenkyo"},
 };
 
-inline constexpr char kAnnanStartpos[] =
-    "lnsgkgsnl/1r5b1/p1ppppp1p/1p5p1/9/1P5P1/P1PPPPP1P/1B5R1/LNSGKGSNL b - 1";
+inline constexpr char kAnnanStartpos[] = "lnsgkgsnl/1r5b1/p1ppppp1p/1p5p1/9/1P5P1/P1PPPPP1P/1B5R1/LNSGKGSNL b - 1";
 
 #ifdef KOMORI_FIXED_RULE
 inline constexpr Rule kDefaultRule = Rule::KOMORI_FIXED_RULE;
@@ -52,7 +51,9 @@ inline constexpr Rule kDefaultRule = Rule::KOMORI_FIXED_RULE;
 inline constexpr Rule kDefaultRule = Rule::standard;
 #endif
 
-inline const char* Startpos(Rule rule) { return rule == Rule::annan ? kAnnanStartpos : SFEN_HIRATE.c_str(); }
+inline const char* Startpos(Rule rule) {
+  return rule == Rule::annan ? kAnnanStartpos : SFEN_HIRATE.c_str();
+}
 
 namespace detail {
 template <std::size_t I, typename F>
@@ -136,6 +137,8 @@ inline Square Offset(Square sq, int df, int dr) {
 
 template <Rule R>
 unsigned MovementTypes(const Board& board, Color us, Square from) {
+  constexpr bool reflects_run =
+      R == Rule::neko || R == Rule::nekoneko || R == Rule::yokoneko || R == Rule::yokonekoneko;
   const unsigned native = 1u << type_of(board.At(from));
   unsigned borrowed = 0;
   const auto borrow = [&](Square sq, Color color) {
@@ -145,8 +148,7 @@ unsigned MovementTypes(const Board& board, Color us, Square from) {
     }
   };
 
-  if constexpr (R == Rule::annan || R == Rule::anhoku || R == Rule::taimen ||
-                R == Rule::haimen || R == Rule::tenjiku) {
+  if constexpr (R == Rule::annan || R == Rule::anhoku || R == Rule::taimen || R == Rule::haimen || R == Rule::tenjiku) {
     constexpr bool behind = R == Rule::annan || R == Rule::haimen || R == Rule::tenjiku;
     constexpr bool enemy = R == Rule::taimen || R == Rule::haimen;
     const int forward = us == BLACK ? -1 : 1;
@@ -166,13 +168,10 @@ unsigned MovementTypes(const Board& board, Color us, Square from) {
     if (donor != NO_PIECE) {
       borrowed = 1u << type_of(donor);
     }
-  } else if constexpr (R == Rule::neko || R == Rule::nekoneko ||
-                       R == Rule::yokoneko || R == Rule::yokonekoneko) {
+  } else if constexpr (reflects_run) {
     constexpr bool horizontal = R == Rule::yokoneko || R == Rule::yokonekoneko;
     constexpr bool mixed = R == Rule::nekoneko || R == Rule::yokonekoneko;
-    const auto along = [&](int step) {
-      return horizontal ? Offset(from, step, 0) : Offset(from, 0, step);
-    };
+    const auto along = [&](int step) { return horizontal ? Offset(from, step, 0) : Offset(from, 0, step); };
     const auto in_run = [&](int step) {
       const auto pc = board.At(along(step));
       return pc != NO_PIECE && (mixed || color_of(pc) == us);
@@ -211,9 +210,8 @@ Bitboard Checkers(const Board& board, Color defender) {
     return ZERO;
   }
   const auto occupied = board.Occupied();
-  const auto candidates =
-      (rookEffect(king, occupied) | bishopEffect(king, occupied) | knightEffect(defender, king)) &
-      board.Pieces(~defender);
+  const auto candidates = (rookEffect(king, occupied) | bishopEffect(king, occupied) | knightEffect(defender, king)) &
+                          board.Pieces(~defender);
   Bitboard checkers = ZERO;
   for (const auto from : candidates) {
     if (Effects<R>(board, ~defender, from, occupied) & king) {
@@ -261,8 +259,7 @@ std::optional<Bitboard> LegalAfter(const Board& board, Color us, Move move) {
     return std::nullopt;
   }
   const auto checkers = Checkers<R>(after, ~us);
-  if (is_drop(move) && move_dropped_piece(move) == PAWN && (checkers & to_sq(move)) &&
-      !HasLegalMove<R>(after, ~us)) {
+  if (is_drop(move) && move_dropped_piece(move) == PAWN && (checkers & to_sq(move)) && !HasLegalMove<R>(after, ~us)) {
     return std::nullopt;
   }
   return checkers;
@@ -278,15 +275,13 @@ std::optional<Bitboard> TryMove(const Position& pos, Move move) {
   const Board board{pos};
   if (is_drop(move)) {
     const auto pt = move_dropped_piece(move);
-    if (pt < PAWN || pt > GOLD || !hand_count(board.HandOf(us), pt) ||
-        board.At(to) != NO_PIECE || DeadSquare<R>(pt, us, to) ||
-        (pt == PAWN && HasPawnOnFile(board, us, to))) {
+    if (pt < PAWN || pt > GOLD || !hand_count(board.HandOf(us), pt) || board.At(to) != NO_PIECE ||
+        DeadSquare<R>(pt, us, to) || (pt == PAWN && HasPawnOnFile(board, us, to))) {
       return std::nullopt;
     }
   } else {
     const auto from = from_sq(move);
-    if (!is_ok(from) || !(board.Pieces(us) & from) ||
-        (board.Pieces(us) & to) || to == board.King(~us) ||
+    if (!is_ok(from) || !(board.Pieces(us) & from) || (board.Pieces(us) & to) || to == board.King(~us) ||
         !CanLand<R>(board, us, type_of(board.At(from)), from, to, is_promote(move)) ||
         !(Effects<R>(board, us, from, board.Occupied()) & to)) {
       return std::nullopt;
@@ -354,9 +349,8 @@ bool VerifyMate(const Position& pos, bool root_is_attacker, const std::vector<Mo
   auto us = pos.side_to_move();
   const auto attacker = root_is_attacker ? us : ~us;
   for (const auto move : moves) {
-    if (!Generate<R>(board, us, [&](Move legal, Bitboard checkers) {
-          return legal == move && (us != attacker || checkers);
-        })) {
+    if (!Generate<R>(board, us,
+                     [&](Move legal, Bitboard checkers) { return legal == move && (us != attacker || checkers); })) {
       return false;
     }
     board.Play(us, move);

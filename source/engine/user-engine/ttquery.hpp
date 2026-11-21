@@ -65,11 +65,11 @@ class QueryFor {
    * @param depth       探索深さ
    */
   constexpr QueryFor(RepetitionTable& rep_table,
-                  CircularEntryPointer initial_entry_pointer,
-                  Key path_key,
-                  Key board_key,
-                  Hand hand,
-                  Depth depth)
+                     CircularEntryPointer initial_entry_pointer,
+                     Key path_key,
+                     Key board_key,
+                     Hand hand,
+                     Depth depth)
       : rep_table_{&rep_table},
         initial_entry_pointer_{initial_entry_pointer},
         path_key_{path_key},

@@ -166,12 +166,12 @@ class KomoringHeightsFor {
   void Print(const Node& n);
 
   tt::TranspositionTableFor<R> tt_;  ///< 置換表
-  EngineOption option_;        ///< エンジンオプション
-  bool pv_search_{false};      ///< 現在PV探索中かどうか
+  EngineOption option_;              ///< エンジンオプション
+  bool pv_search_{false};            ///< 現在PV探索中かどうか
 
   SearchMonitor monitor_;  ///< 探索モニター
 
-  std::vector<Move> best_moves_;                 ///< 詰み手順
+  std::vector<Move> best_moves_;                       ///< 詰み手順
   std::deque<ExpansionStackFor<R>> expansion_list_{};  ///< 局面展開のための一時領域
   Score score_{};  ///< 現在の探索評価値。余詰探索中に CurrentInfo() で取得できるようにここにおいておく
 

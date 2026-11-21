@@ -182,11 +182,11 @@ class LocalExpansionFor {
    * @param multi_pv 勝ちになる手をいくつ見つけるか。1以上でなければならない
    */ // NOLINTNEXTLINE(readability-function-cognitive-complexity)
   LocalExpansionFor(tt::TranspositionTableFor<R>& tt,
-                 const Node& n,
-                 MateLen len,
-                 bool first_search,
-                 BitSet64 sum_mask = BitSet64::Full(),
-                 std::uint32_t multi_pv = 1)
+                    const Node& n,
+                    MateLen len,
+                    bool first_search,
+                    BitSet64 sum_mask = BitSet64::Full(),
+                    std::uint32_t multi_pv = 1)
       : or_node_{n.IsOrNode()},
         mp_{n, true},
         delayed_move_list_{n, mp_},
@@ -749,10 +749,10 @@ class LocalExpansionFor {
     }
   }
 
-  const bool or_node_;                       ///< 現局面が OR node かどうか
+  const bool or_node_;         ///< 現局面が OR node かどうか
   const MovePickerFor<R> mp_;  ///< 現局面の合法手
   const std::conditional_t<kVariant, detail::NoDelayedMoves, DelayedMoveList> delayed_move_list_;
-  const MateLen len_;                        ///< 現局面における残り探索手数
+  const MateLen len_;                     ///< 現局面における残り探索手数
   const BoardKeyHandPair key_hand_pair_;  ///< 現局面の盤面ハッシュ値と持ち駒。二重カウント対策で用いる。
   const std::uint32_t multi_pv_;  ///< MultiPv の値。1以上でなければならない
 

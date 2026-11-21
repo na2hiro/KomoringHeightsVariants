@@ -100,7 +100,8 @@ struct BranchRootEdge {
  * ```
  */
 template <variant::Rule R>
-inline std::optional<BranchRootEdge> FindKnownAncestor(tt::TranspositionTableFor<R>& tt, const NodeFor<R>& n,
+inline std::optional<BranchRootEdge> FindKnownAncestor(tt::TranspositionTableFor<R>& tt,
+                                                       const NodeFor<R>& n,
                                                        Move move) {
   BoardKeyHandPair key_hand_pair = n.BoardKeyHandPairAfter(move);
   PnDn last_pn = kInfinitePnDn;

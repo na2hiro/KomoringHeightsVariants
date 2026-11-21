@@ -214,9 +214,7 @@ class NodeFor {
   }
 
  private:
-  Key RuleKey() const {
-    return UINT64_C(0x9e3779b97f4a7c15) * (2 * static_cast<unsigned>(R) + or_color_);
-  }
+  Key RuleKey() const { return UINT64_C(0x9e3779b97f4a7c15) * (2 * static_cast<unsigned>(R) + or_color_); }
 
   /// `move` 直前の経路ハッシュ値
   Key PathKeyBefore(Move move) const { return ::komori::PathKeyBefore(path_key_, move, depth_); }

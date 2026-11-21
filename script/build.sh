@@ -14,7 +14,7 @@
 
 MAKE=make
 MAKEFILE=Makefile
-JOBS=`grep -c ^processor /proc/cpuinfo 2>/dev/null`
+JOBS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
 if [ "$JOBS" -gt 8 ]; then
   JOBS=8
 fi

@@ -88,8 +88,8 @@ bool IsValidVariantSfen(const std::string& sfen) {
   }
   unsigned move_number = 0;
   const auto parsed = std::from_chars(ply.data(), ply.data() + ply.size(), move_number);
-  if (parsed.ec != std::errc{} || parsed.ptr != ply.data() + ply.size() ||
-      move_number == 0 || move_number > INT_MAX - MAX_PLY - komori::kDepthMax) {
+  if (parsed.ec != std::errc{} || parsed.ptr != ply.data() + ply.size() || move_number == 0 ||
+      move_number > INT_MAX - MAX_PLY - komori::kDepthMax) {
     return false;
   }
 
@@ -166,8 +166,12 @@ bool IsValidVariantSfen(const std::string& sfen) {
 
 namespace komori::variant {
 
-Rule ActiveRule() { return g_active_rule; }
-bool RuleChangePending() { return g_active_rule != g_requested_rule; }
+Rule ActiveRule() {
+  return g_active_rule;
+}
+bool RuleChangePending() {
+  return g_active_rule != g_requested_rule;
+}
 
 bool SetPosition(Position& pos, StateInfo& state, Thread* thread, const std::string& sfen) {
   if (g_active_rule != Rule::standard && !IsValidVariantSfen(sfen)) {
@@ -266,9 +270,8 @@ void Search::clear() {
 
   if (!g_searcher || komori::variant::RuleChangePending()) {
     g_active_rule = g_requested_rule;
-    g_searcher = komori::variant::Dispatch(g_active_rule, [](auto rule) -> std::unique_ptr<Searcher> {
-      return std::make_unique<RuleSearcher<rule()>>();
-    });
+    g_searcher = komori::variant::Dispatch(
+        g_active_rule, [](auto rule) -> std::unique_ptr<Searcher> { return std::make_unique<RuleSearcher<rule()>>(); });
   }
   g_searcher->Init(g_option, Threads.size());
 }
