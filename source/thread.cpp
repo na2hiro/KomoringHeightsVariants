@@ -163,10 +163,10 @@ void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
 	Search::RootMoves rootMoves;
 	bool physical_only = false;
 #if defined(USER_ENGINE)
-	namespace variant = komori::variant;
-	physical_only = variant::ActiveRule() != variant::Rule::standard;
+	namespace variant_usi = komori::variant;
+	physical_only = variant_usi::ActiveRule() != variant_usi::Rule::standard;
 	if (physical_only) {
-		for (const auto move : variant::LegalMoves(pos))
+		for (const auto move : variant_usi::LegalMoves(pos))
 			if (limits.searchmoves.empty() || std::count(limits.searchmoves.begin(), limits.searchmoves.end(), move))
 				rootMoves.emplace_back(move);
 	} else
