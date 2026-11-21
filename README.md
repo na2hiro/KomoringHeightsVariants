@@ -26,6 +26,9 @@ USIプロトコルの検討機能（`go ...`）および詰将棋解答機能（
 
 詳細なエンジンオプションについては [EngineOptions](source/engine/user-engine/docs/EngineOptions.txt) を参照してください。
 
+安南・安北などの性能変化系12ルールでも `go` と `go mate` を使用できます。
+ルール名、ビルド方法、USI の設定例は [変則将棋](docs/variants.md) を参照してください。
+
 ## How to Build
 
 ソースからビルドするには以下のコマンドを使用します。

@@ -93,6 +93,39 @@ class MovePicker {
   std::size_t size_;                                      ///< 合法手の個数
 };
 
+template <variant::Rule R>
+class VariantMovePicker {
+ public:
+  explicit VariantMovePicker(const NodeFor<R>& n, bool ordering = false) {
+    if (!n.IsOrNode() && !n.Pos().in_check()) {
+      return;
+    }
+    variant::Generate<R>(variant::Board{n.Pos()}, n.Us(), [&](Move move, Bitboard checkers) {
+      if (!n.IsOrNode() || checkers) {
+        ExtMove entry{};
+        entry.move = move;
+        if (ordering) {
+          entry.value = MoveBriefEvaluation(n, move);
+        }
+        moves_.push_back(entry);
+      }
+      return false;
+    });
+  }
+
+  std::size_t size() const { return moves_.size(); }
+  bool empty() const { return moves_.empty(); }
+  auto begin() const { return moves_.begin(); }
+  auto end() const { return moves_.end(); }
+  const ExtMove& operator[](std::size_t i) const { return moves_[i]; }
+
+ private:
+  std::vector<ExtMove> moves_;
+};
+
+template <variant::Rule R>
+using MovePickerFor = std::conditional_t<R == variant::Rule::standard, MovePicker, VariantMovePicker<R>>;
+
 }  // namespace komori
 
 #endif  // KOMORI_MOVE_PICKER_HPP_

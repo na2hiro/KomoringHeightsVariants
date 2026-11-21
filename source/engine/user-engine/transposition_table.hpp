@@ -103,8 +103,9 @@ class TranspositionTableImpl {
    * @param n 現局面
    * @return クエリ
    */
-  Query BuildQuery(const Node& n) {
-    const auto board_key = n.Pos().state()->board_key();
+  template <variant::Rule R>
+  Query BuildQuery(const NodeFor<R>& n) {
+    const auto board_key = n.BoardKey();
     const auto path_key = n.GetPathKey();
     const auto hand = n.OrHand();
     const auto depth = n.GetDepth();
@@ -121,8 +122,9 @@ class TranspositionTableImpl {
    *
    * `BuildQuery()` と比較して、`n.DoMove()` により局面を動かさなくてもクエリを構築できるため高速に動作する。
    */
-  Query BuildChildQuery(const Node& n, Move move) {
-    const auto board_key = n.Pos().board_key_after(move);
+  template <variant::Rule R>
+  Query BuildChildQuery(const NodeFor<R>& n, Move move) {
+    const auto board_key = n.BoardKeyAfter(move);
     const auto path_key = n.PathKeyAfter(move);
     const auto hand = n.OrHandAfter(move);
     const auto depth = n.GetDepth() + 1;
@@ -216,6 +218,11 @@ class TranspositionTableImpl {
  * @brief 置換表の本体。詳しい実装は `detail::TranspositionTableImpl` を参照。
  */
 using TranspositionTable = detail::TranspositionTableImpl<Query, RegularTable, RepetitionTable>;
+using ExactTranspositionTable = detail::TranspositionTableImpl<ExactQuery, RegularTable, RepetitionTable>;
+
+template <variant::Rule R>
+using TranspositionTableFor =
+    std::conditional_t<R == variant::Rule::standard, TranspositionTable, ExactTranspositionTable>;
 }  // namespace komori::tt
 
 #endif  // KOMORI_TRANSPOSITION_TABLE_HPP_

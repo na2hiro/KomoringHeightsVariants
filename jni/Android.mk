@@ -243,6 +243,13 @@ LOCAL_SRC_FILES += \
 endif
 
 ifeq ($(YANEURAOU_EDITION),USER_ENGINE)
+RULESET ?= standard
+ifneq ($(RULESET),standard)
+RULESET_SUFFIX = _$(RULESET)
+endif
+ifneq ($(RULESET),all)
+CPPFLAGS += -DKOMORI_FIXED_RULE=$(RULESET)
+endif
 LOCAL_SRC_FILES += \
 		../source/engine/user-engine/initial_estimation.cpp \
 		../source/engine/user-engine/komoring_heights.cpp \
@@ -264,7 +271,7 @@ CPPFLAGS += -DPV_OUTPUT_DRAW_ONLY -DFORCE_BIND_THIS_THREAD
 endif
 
 
-LOCAL_MODULE    := $(ENGINE_NAME)_$(TARGET_ARCH_ABI)
+LOCAL_MODULE    := $(ENGINE_NAME)$(RULESET_SUFFIX)_$(TARGET_ARCH_ABI)
 LOCAL_CXXFLAGS  := -std=c++17 -fno-exceptions -fno-rtti -Wextra -Ofast -MMD -MP -fpermissive -D__STDINT_MACROS -D__STDC_LIMIT_MACROS $(CPPFLAGS)
 LOCAL_CXXFLAGS += -DNDEBUG -fPIE -Wno-unused-parameter -flto
 LOCAL_LDFLAGS += -fPIE -pie -flto

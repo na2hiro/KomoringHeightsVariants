@@ -167,16 +167,25 @@ else
 endif
 
 TARGETDIR = .
+RULESET ?= standard
+ifeq ($(YANEURAOU_EDITION),USER_ENGINE)
+ifneq ($(RULESET),standard)
+RULESET_SUFFIX = -$(RULESET)
+endif
+ifneq ($(RULESET),all)
+CPPFLAGS += -DKOMORI_FIXED_RULE=$(RULESET)
+endif
+endif
 ifeq ($(OS),Windows_NT)
 	CPPFLAGS += $(WCPPFLAGS)
 	LDFLAGS += -static -Wl,--stack,25000000
-	TARGET = $(TARGETDIR)/KomoringHeights-by-gcc.exe
+	TARGET = $(TARGETDIR)/KomoringHeights-by-gcc$(RULESET_SUFFIX).exe
 else
 	CPPFLAGS += -D_LINUX
 	ifeq ($(DEBUG),OFF)
-		TARGET = $(TARGETDIR)/KomoringHeights-by-gcc
+		TARGET = $(TARGETDIR)/KomoringHeights-by-gcc$(RULESET_SUFFIX)
 	else
-		TARGET = $(TARGETDIR)/KomoringHeights-by-gcc-debug
+		TARGET = $(TARGETDIR)/KomoringHeights-by-gcc-debug$(RULESET_SUFFIX)
 	endif
 endif
 
@@ -264,9 +273,9 @@ LDFLAGS += -lpthread
 LDFLAGS += -v
 
 ifeq ($(DEBUG),OFF)
-	OBJDIR   = ../obj
+	OBJDIR   = ../obj$(RULESET_SUFFIX)
 else
-	OBJDIR   = ../debug_obj
+	OBJDIR   = ../debug_obj$(RULESET_SUFFIX)
 endif
 ifeq "$(strip $(OBJDIR))" ""
 	OBJDIR = ..

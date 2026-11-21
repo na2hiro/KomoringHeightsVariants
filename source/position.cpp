@@ -9,6 +9,7 @@
 #include <iostream>
 #include <sstream>
 #include <cstring> // std::memset()
+#include <type_traits>
 
 #if defined(EVAL_KPPT) || defined(EVAL_KPP_KKPT) || defined(EVAL_NNUE)
 #include "eval/evaluate_common.h"
@@ -151,7 +152,7 @@ std::string pretty(Piece pc) {
 #endif
 
 // sfen文字列で盤面を設定する
-void Position::set(std::string sfen , StateInfo* si , Thread* th)
+void Position::set(std::string sfen , StateInfo* si , Thread* th, bool physical_only)
 {
 	std::memset(this, 0, sizeof(Position));
 
@@ -289,7 +290,7 @@ void Position::set(std::string sfen , StateInfo* si , Thread* th)
 
 	// --- StateInfoの更新
 
-	set_state(st);
+	set_state(st, physical_only);
 
 	// 現局面で王手がかかっているならst->continuous_check[them] = 1にしないと
 	// 連続王手の千日手の判定が不正確な気がするが、どのみち2回目の出現を負け扱いしているのでまあいいか..
@@ -317,7 +318,7 @@ void Position::set(std::string sfen , StateInfo* si , Thread* th)
 
 #if ASSERT_LV >= 3
   // これassertにしてしまうと、先手玉のいない局面や駒落ちの局面で落ちて困る。
-	if (!is_ok(*this))
+	if (!physical_only && !is_ok(*this))
 		std::cout << "info string Illigal Position?" << endl;
 #endif
 
@@ -398,15 +399,16 @@ const std::string Position::sfen(int gamePly_) const
 	return ss.str();
 }
 
-void Position::set_state(StateInfo* si) const {
+void Position::set_state(StateInfo* si, bool physical_only) const {
 
 	// --- bitboard
 
 	// この局面で自玉に王手している敵駒
-	st->checkersBB = attackers_to(~sideToMove, king_square(sideToMove));
-
-	// 王手情報の初期化
-	set_check_info<false>(si);
+	if (!physical_only)
+	{
+		st->checkersBB = attackers_to(~sideToMove, king_square(sideToMove));
+		set_check_info<false>(si);
+	}
 
 	// --- hash keyの計算
 	si->board_key_ = sideToMove == BLACK ? Zobrist::zero : Zobrist::side;
@@ -1032,8 +1034,8 @@ Move Position::to_move(Move16 m16) const
 // ----------------------------------
 
 // 指し手で盤面を1手進める。
-template <Color Us>
-void Position::do_move_impl(Move m, StateInfo& new_st, bool givesCheck)
+template <Color Us, typename Check>
+void Position::do_move_impl(Move m, StateInfo& new_st, Check check)
 {
 	// MOVE_NONEはもちろん、MOVE_NULL , MOVE_RESIGNなどお断り。
 	ASSERT_LV3(is_ok(m));
@@ -1159,7 +1161,12 @@ void Position::do_move_impl(Move m, StateInfo& new_st, bool givesCheck)
 
 		// 王手している駒のbitboardを更新する。
 		// 駒打ちなのでこの駒で王手になったに違いない。駒打ちで両王手はありえないので王手している駒はいまtoに置いた駒のみ。
-		if (givesCheck)
+		if constexpr (std::is_same_v<Check, Bitboard>)
+		{
+			st->checkersBB = check;
+			st->continuousCheck[Us] = check ? prev->continuousCheck[Us] + 2 : 0;
+		}
+		else if (check)
 		{
 			st->checkersBB = Bitboard(to);
 			st->continuousCheck[Us] = prev->continuousCheck[Us] + 2;
@@ -1309,7 +1316,12 @@ void Position::do_move_impl(Move m, StateInfo& new_st, bool givesCheck)
 		update_bitboards();
 
 		// 王手している駒のbitboardを更新する。
-		if (givesCheck)
+		if constexpr (std::is_same_v<Check, Bitboard>)
+		{
+			st->checkersBB = check;
+			st->continuousCheck[Us] = check ? prev->continuousCheck[Us] + 2 : 0;
+		}
+		else if (check)
 		{
 #if 1
 			// 高速化のために差分更新する時用
@@ -1377,7 +1389,8 @@ void Position::do_move_impl(Move m, StateInfo& new_st, bool givesCheck)
 	st->hand = hand[Them];
 
 	// このタイミングで王手関係の情報を更新しておいてやる。
-	set_check_info<false>(st);
+	if constexpr (std::is_same_v<Check, bool>)
+		set_check_info<false>(st);
 
 	//ASSERT_LV5(evalList.is_valid(*this));
 
@@ -1653,6 +1666,16 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck)
 	else
 		do_move_impl<WHITE>(m, newSt, givesCheck);
 }
+
+#if defined(USER_ENGINE)
+void Position::do_move_with_checkers(Move m, StateInfo& newSt, Bitboard checkers)
+{
+	if (sideToMove == BLACK)
+		do_move_impl<BLACK>(m, newSt, checkers);
+	else
+		do_move_impl<WHITE>(m, newSt, checkers);
+}
+#endif
 
 // undo_move()を先後分けたdo_move_impl<>()を呼び出す。
 void Position::undo_move(Move m)

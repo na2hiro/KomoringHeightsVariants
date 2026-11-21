@@ -44,6 +44,49 @@ inline std::optional<SearchResult> CheckObviousFinalOrNode(Node& n) {
   }
   return std::nullopt;
 }
+
+template <variant::Rule R>
+inline std::optional<SearchResult> CheckObviousFinalOrNode(NodeFor<R>& n) {
+  if (CheckMate1Ply(n).first != MOVE_NONE) {
+    return SearchResult::MakeFinal<true>(n.OrHand(), MateLen{1}, 1);
+  }
+  return std::nullopt;
+}
+
+template <typename T, bool kDynamic>
+class ExpansionBuffer {
+ public:
+  explicit ExpansionBuffer(std::size_t) {}
+  T& operator[](std::size_t index) { return entries_[index]; }
+  const T& operator[](std::size_t index) const { return entries_[index]; }
+
+ private:
+  std::array<T, kMaxCheckMovesPerNode> entries_;
+};
+
+template <typename T>
+class ExpansionBuffer<T, true> {
+ public:
+  explicit ExpansionBuffer(std::size_t size) : entries_(size) {}
+  T& operator[](std::size_t index) { return entries_[index]; }
+  const T& operator[](std::size_t index) const { return entries_[index]; }
+
+ private:
+  std::vector<T> entries_;
+};
+
+class DynamicIndexStack : public std::vector<std::uint32_t> {
+ public:
+  void Push(std::uint32_t index) { push_back(index); }
+  void Pop() { pop_back(); }
+};
+
+struct NoDelayedMoves {
+  template <typename N, typename M>
+  NoDelayedMoves(const N&, const M&) {}
+  std::optional<std::uint32_t> Prev(std::uint32_t) const { return std::nullopt; }
+  std::optional<std::uint32_t> Next(std::uint32_t) const { return std::nullopt; }
+};
 }  // namespace detail
 
 /**
@@ -100,8 +143,11 @@ inline std::optional<SearchResult> CheckObviousFinalOrNode(Node& n) {
  * 勝ちになる手は、以降の探索から除外される。除外されている手の個数は `excluded_moves_` で管理されている。
  * `BestMove()` や `FrontResult()` で現時点の最善手を取得するとき、除外された手は最善手に含まれないので注意すること。
  */
-class LocalExpansion {
+template <variant::Rule R>
+class LocalExpansionFor {
  private:
+  static constexpr bool kVariant = R != variant::Rule::standard;
+  using Node = NodeFor<R>;
   /**
    * @brief  `idx_` の比較器を生成する。
    * @return 関数オブジェクト（比較器）
@@ -135,7 +181,7 @@ class LocalExpansion {
    * @param sum_mask δ値を和で計算する子の集合
    * @param multi_pv 勝ちになる手をいくつ見つけるか。1以上でなければならない
    */ // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-  LocalExpansion(tt::TranspositionTable& tt,
+  LocalExpansionFor(tt::TranspositionTableFor<R>& tt,
                  const Node& n,
                  MateLen len,
                  bool first_search,
@@ -147,7 +193,12 @@ class LocalExpansion {
         len_{len},
         key_hand_pair_{n.GetBoardKeyHandPair()},
         multi_pv_{multi_pv},
+        results_{mp_.size()},
+        queries_{mp_.size()},
         sum_mask_{sum_mask} {
+    if constexpr (kVariant) {
+      idx_.reserve(mp_.size());
+    }
     // 1手詰め／1手不詰判定のために、const を一時的に外す
     Node& nn = const_cast<Node&>(n);
 
@@ -174,8 +225,14 @@ class LocalExpansion {
             query.LookUp(does_have_old_child_, len - 1, [&n, &move = move]() { return InitialPnDn(n, move.move); });
 
         if (!result.IsFinal()) {
-          if (!IsSumDeltaNode(n, move.move) || result.Delta(or_node_) >= detail::kForceSumPnDn) {
-            sum_mask_.Reset(i_raw);
+          if constexpr (kVariant) {
+            if (result.Delta(or_node_) >= detail::kForceSumPnDn) {
+              sum_mask_.Reset(i_raw);
+            }
+          } else {
+            if (!IsSumDeltaNode(n, move.move) || result.Delta(or_node_) >= detail::kForceSumPnDn) {
+              sum_mask_.Reset(i_raw);
+            }
           }
 
           bool i_is_skipped = false;
@@ -193,7 +250,8 @@ class LocalExpansion {
             next_dep = delayed_move_list_.Prev(*next_dep);
           }
 
-          if (!i_is_skipped && !or_node_ && first_search && result.GetUnknownData().is_first_visit) {
+          if (!i_is_skipped && !or_node_ && first_search && result.GetUnknownData().is_first_visit &&
+              (!kVariant || n.GetDepth() < kDepthMax - 1)) {
             nn.DoMove(move.move);
             if (auto res = detail::CheckObviousFinalOrNode(nn); res.has_value()) {
               result = *res;
@@ -218,15 +276,15 @@ class LocalExpansion {
   }
 
   /// Copy constructor(delete)
-  LocalExpansion(const LocalExpansion&) = delete;
+  LocalExpansionFor(const LocalExpansionFor&) = delete;
   /// Move constructor(delete)
-  LocalExpansion(LocalExpansion&&) = delete;
+  LocalExpansionFor(LocalExpansionFor&&) = delete;
   /// Copy assign operator(delete)
-  LocalExpansion& operator=(const LocalExpansion&) = delete;
+  LocalExpansionFor& operator=(const LocalExpansionFor&) = delete;
   /// Move assign operator(delete)
-  LocalExpansion& operator=(LocalExpansion&&) = delete;
+  LocalExpansionFor& operator=(LocalExpansionFor&&) = delete;
   /// Destructor(default)
-  ~LocalExpansion() = default;
+  ~LocalExpansionFor() = default;
 
   /**
    * @brief 合法手がないかどうか
@@ -277,6 +335,11 @@ class LocalExpansion {
    * スキップすることがある。
    */
   SearchResult CurrentResult(const Node& n) const {
+    if constexpr (kVariant) {
+      if (!or_node_ && !n.Pos().in_check()) {
+        return SearchResult::MakeFinal<false>(n.OrHand(), kDepthMaxMateLen, 1);
+      }
+    }
     if (GetPhi() == 0) {
       return GetWinResult(n);
     } else if (GetDelta() == 0) {
@@ -554,13 +617,14 @@ class LocalExpansion {
     const auto after_hand = result.GetFinalData().hand;
 
     if (or_node_) {
-      const auto proof_hand = BeforeHand(n.Pos(), best_move, after_hand);
+      const auto proof_hand = kVariant ? n.OrHand() : BeforeHand(n.Pos(), best_move, after_hand);
       return SearchResult::MakeFinal<true>(proof_hand, mate_len, amount);
     } else {
       auto disproof_hand = after_hand;
 
-      // 駒打ちならその駒を持っていないといけない
-      if (is_drop(best_move)) {
+      if constexpr (kVariant) {
+        disproof_hand = n.OrHand();
+      } else if (is_drop(best_move)) {
         const auto pr = move_dropped_piece(best_move);
         const auto pr_cnt = hand_count(MergeHand(n.OrHand(), n.AndHand()), pr);
         const auto disproof_pr_cnt = hand_count(disproof_hand, pr);
@@ -597,10 +661,9 @@ class LocalExpansion {
       SearchAmount amount = 1;
       for (const auto i_raw : idx_) {
         const auto& result = results_[i_raw];
-        const auto child_move = mp_[i_raw];
-        const auto child_disproof_hand = BeforeHand(n.Pos(), child_move, result.GetFinalData().hand);
-
-        set.Update(child_disproof_hand);
+        if constexpr (!kVariant) {
+          set.Update(BeforeHand(n.Pos(), mp_[i_raw], result.GetFinalData().hand));
+        }
         amount = std::max(amount, result.Amount());
         if (result.Len() < mate_len) {
           mate_len = result.Len();
@@ -618,7 +681,7 @@ class LocalExpansion {
           }
         }
       }
-      const auto disproof_hand = set.Get(n.Pos());
+      const auto disproof_hand = kVariant ? n.OrHand() : set.Get(n.Pos());
       return SearchResult::MakeFinal<false>(disproof_hand, mate_len + 1, amount);
     } else {
       // 子局面の証明駒の極小集合を計算する
@@ -628,7 +691,9 @@ class LocalExpansion {
       for (const auto i_raw : idx_) {
         const auto& result = results_[i_raw];
 
-        set.Update(result.GetFinalData().hand);
+        if constexpr (!kVariant) {
+          set.Update(result.GetFinalData().hand);
+        }
         amount = std::max(amount, result.Amount());
         if (result.Len() > mate_len) {
           mate_len = result.Len();
@@ -636,7 +701,7 @@ class LocalExpansion {
       }
       amount += std::max<SearchAmount>(mp_.size(), 1) - 1;
 
-      const auto proof_hand = set.Get(n.Pos());
+      const auto proof_hand = kVariant ? n.OrHand() : set.Get(n.Pos());
       return SearchResult::MakeFinal<true>(proof_hand, mate_len + 1, amount);
     }
   }
@@ -685,16 +750,16 @@ class LocalExpansion {
   }
 
   const bool or_node_;                       ///< 現局面が OR node かどうか
-  const MovePicker mp_;                      ///< 現局面の合法手
-  const DelayedMoveList delayed_move_list_;  ///< 後回しにしている手のグラフ構造
+  const MovePickerFor<R> mp_;  ///< 現局面の合法手
+  const std::conditional_t<kVariant, detail::NoDelayedMoves, DelayedMoveList> delayed_move_list_;
   const MateLen len_;                        ///< 現局面における残り探索手数
   const BoardKeyHandPair key_hand_pair_;  ///< 現局面の盤面ハッシュ値と持ち駒。二重カウント対策で用いる。
   const std::uint32_t multi_pv_;  ///< MultiPv の値。1以上でなければならない
 
   /// 子の現在の評価値結果一覧
-  std::array<SearchResult, kMaxCheckMovesPerNode> results_;
+  detail::ExpansionBuffer<SearchResult, kVariant> results_;
   /// 子のクエリ一覧。コンストラクト時に作ったクエリを使い回すことで高速化できる
-  std::array<tt::Query, kMaxCheckMovesPerNode> queries_;
+  detail::ExpansionBuffer<std::conditional_t<kVariant, tt::ExactQuery, tt::Query>, kVariant> queries_;
 
   /// 現局面の評価値が古い探索情報に基づくものかどうか。TCA の探索延長の判断に用いる。
   bool does_have_old_child_{false};
@@ -705,13 +770,15 @@ class LocalExpansion {
   /// δ値を和で計算すべき子の一覧。ビットが立っている子は和、立っていない子は最大値で計上する。
   BitSet64 sum_mask_;
   /// 現在有効な生添字の一覧。「良さ順」で並んでいる。
-  FixedSizeStack<std::uint32_t, kMaxCheckMovesPerNode> idx_;
+  std::conditional_t<kVariant, detail::DynamicIndexStack, FixedSizeStack<std::uint32_t, kMaxCheckMovesPerNode>> idx_;
 
   /// 勝ちになる手を見つけた個数
   /// multi_pv_ == 1 のときは、この値は常に 0 である。multi_pv_ > 1 のとき、勝ち（phi==0）を見つけた後に探索を続ける
   /// 際に用いる。常に excluded_moves_ <= multi_pv_ - 1 かつ excluded_moves_ <= mp_.size() である。
   std::uint32_t excluded_moves_{0};
 };
+
+using LocalExpansion = LocalExpansionFor<variant::Rule::standard>;
 }  // namespace komori
 
 #endif  // KOMORI_LOCAL_EXPANSION_HPP_

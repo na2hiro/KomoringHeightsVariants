@@ -25,8 +25,9 @@ std::pair<PnDn, PnDn> NextPnDnThresholds(PnDn pn, PnDn dn, PnDn curr_thpn, PnDn 
  * @param n   現局面（AND node）
  * @return `n` において詰みを逃れる手（あれば）
  */
-std::optional<Move> GetEvasion(tt::TranspositionTable& tt, Node& n) {
-  for (const auto move : MovePicker{n}) {
+template <variant::Rule R>
+std::optional<Move> GetEvasion(tt::TranspositionTableFor<R>& tt, NodeFor<R>& n) {
+  for (const auto move : MovePickerFor<R>{n}) {
     const auto query = tt.BuildChildQuery(n, move);
     bool does_have_old_child = false;
     const auto result =
@@ -39,11 +40,12 @@ std::optional<Move> GetEvasion(tt::TranspositionTable& tt, Node& n) {
   return std::nullopt;
 }
 
-std::pair<Move, MateLen> LookUpBestMove(tt::TranspositionTable& tt, Node& n, MateLen len) {
+template <variant::Rule R>
+std::pair<Move, MateLen> LookUpBestMove(tt::TranspositionTableFor<R>& tt, NodeFor<R>& n, MateLen len) {
   Move best_move = MOVE_NONE;
   MateLen best_len = n.IsOrNode() ? kDepthMaxMateLen : kZeroMateLen;
   MateLen best_disproven_len = kZeroMateLen;
-  for (const auto move : MovePicker{n}) {
+  for (const auto move : MovePickerFor<R>{n}) {
     const auto query = tt.BuildChildQuery(n, move.move);
     const auto [disproven_len, proven_len] = query.FinalRange();
     if (n.IsOrNode() && proven_len < best_len) {
@@ -66,11 +68,12 @@ std::pair<Move, MateLen> LookUpBestMove(tt::TranspositionTable& tt, Node& n, Mat
   return {best_move, best_len};
 }
 
-std::pair<Move, MateLen> LookUpBestMoveOrNode(tt::TranspositionTable& tt, Node& n) {
+template <variant::Rule R>
+std::pair<Move, MateLen> LookUpBestMoveOrNode(tt::TranspositionTableFor<R>& tt, NodeFor<R>& n) {
   Move best_move = MOVE_NONE;
   MateLen best_proven_len = kDepthMaxPlus1MateLen;
   MateLen best_disproven_len = kMinus1MateLen;
-  for (const auto move : MovePicker{n}) {
+  for (const auto move : MovePickerFor<R>{n}) {
     const auto query = tt.BuildChildQuery(n, move.move);
     const auto [disproven_len, proven_len] = query.FinalRange();
     if (proven_len < best_proven_len || (proven_len == best_proven_len && disproven_len > best_disproven_len)) {
@@ -83,11 +86,12 @@ std::pair<Move, MateLen> LookUpBestMoveOrNode(tt::TranspositionTable& tt, Node& 
   return {best_move, best_proven_len};
 }
 
-std::pair<Move, MateLen> LookUpBestMoveAndNode(tt::TranspositionTable& tt, Node& n) {
+template <variant::Rule R>
+std::pair<Move, MateLen> LookUpBestMoveAndNode(tt::TranspositionTableFor<R>& tt, NodeFor<R>& n) {
   Move best_move = MOVE_NONE;
   MateLen best_proven_len = kMinus1MateLen;
   MateLen best_disproven_len = kDepthMaxPlus1MateLen;
-  for (const auto move : MovePicker{n}) {
+  for (const auto move : MovePickerFor<R>{n}) {
     const auto query = tt.BuildChildQuery(n, move.move);
     const auto [disproven_len, proven_len] = query.FinalRange();
     if (proven_len > best_proven_len || (proven_len == best_proven_len && disproven_len < best_disproven_len)) {
@@ -100,11 +104,12 @@ std::pair<Move, MateLen> LookUpBestMoveAndNode(tt::TranspositionTable& tt, Node&
   return {best_move, best_proven_len};
 }
 
-std::pair<Move, MateLen> LookUpMaxDisprovenAndNode(tt::TranspositionTable& tt, Node& n) {
+template <variant::Rule R>
+std::pair<Move, MateLen> LookUpMaxDisprovenAndNode(tt::TranspositionTableFor<R>& tt, NodeFor<R>& n) {
   Move best_move = MOVE_NONE;
   MateLen best_proven_len = kDepthMaxPlus1MateLen;
   MateLen best_disproven_len = kMinus1MateLen;
-  for (const auto move : MovePicker{n}) {
+  for (const auto move : MovePickerFor<R>{n}) {
     const auto query = tt.BuildChildQuery(n, move.move);
     const auto [disproven_len, proven_len] = query.FinalRange();
     if (disproven_len > best_disproven_len || (disproven_len == best_disproven_len && proven_len < best_proven_len)) {
@@ -118,7 +123,8 @@ std::pair<Move, MateLen> LookUpMaxDisprovenAndNode(tt::TranspositionTable& tt, N
 }
 }  // namespace
 
-void KomoringHeights::Init(const EngineOption& option, std::uint32_t num_threads) {
+template <variant::Rule R>
+void KomoringHeightsFor<R>::Init(const EngineOption& option, std::uint32_t num_threads) {
   option_ = option;
   tt_.Resize(option_.hash_mb);
   expansion_list_.resize(num_threads);
@@ -126,7 +132,7 @@ void KomoringHeights::Init(const EngineOption& option, std::uint32_t num_threads
 
 #if defined(USE_TT_SAVE_AND_LOAD)
   const auto& tt_read_path = option_.tt_read_path;
-  if (!tt_read_path.empty()) {
+  if (R == variant::Rule::standard && !tt_read_path.empty()) {
     std::ifstream ifs(tt_read_path, std::ios::binary);
     if (ifs) {
       sync_cout << "info string load_path: " << tt_read_path << sync_endl;
@@ -136,11 +142,13 @@ void KomoringHeights::Init(const EngineOption& option, std::uint32_t num_threads
 #endif  // defined(USE_TT_SAVE_AND_LOAD)
 }
 
-void KomoringHeights::Clear() {
+template <variant::Rule R>
+void KomoringHeightsFor<R>::Clear() {
   tt_.Clear();
 }
 
-void KomoringHeights::NewSearch(const Position& n, bool is_root_or_node) {
+template <variant::Rule R>
+void KomoringHeightsFor<R>::NewSearch(const Position& n, bool is_root_or_node) {
   auto& nn = const_cast<Position&>(n);
   const Node node{nn, is_root_or_node};
 
@@ -155,7 +163,8 @@ void KomoringHeights::NewSearch(const Position& n, bool is_root_or_node) {
   }
 }
 
-NodeState KomoringHeights::Search(const Position& n, bool is_root_or_node) {
+template <variant::Rule R>
+NodeState KomoringHeightsFor<R>::Search(const Position& n, bool is_root_or_node) {
   auto& nn = const_cast<Position&>(n);
   Node node{nn, is_root_or_node};
 
@@ -163,7 +172,7 @@ NodeState KomoringHeights::Search(const Position& n, bool is_root_or_node) {
 
 #if defined(USE_TT_SAVE_AND_LOAD)
   const auto tt_write_path = option_.tt_write_path;
-  if (!tt_write_path.empty()) {
+  if (R == variant::Rule::standard && !tt_write_path.empty()) {
     std::ofstream ofs(tt_write_path, std::ios::binary);
     if (ofs) {
       sync_cout << "info string save_path: " << tt_write_path << sync_endl;
@@ -176,13 +185,19 @@ NodeState KomoringHeights::Search(const Position& n, bool is_root_or_node) {
     if (best_moves_.size() % 2 != static_cast<int>(is_root_or_node)) {
       sync_cout << "info string Failed to detect PV" << sync_endl;
     }
+    if constexpr (R != variant::Rule::standard) {
+      if (!variant::VerifyMate<R>(n, is_root_or_node, best_moves_)) {
+        return NodeState::kUnknown;
+      }
+    }
   }
 
   return state;
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
-std::pair<NodeState, MateLen> KomoringHeights::SearchMainLoop(Node& n) {
+template <variant::Rule R>
+std::pair<NodeState, MateLen> KomoringHeightsFor<R>::SearchMainLoop(Node& n) {
   NodeState node_state = NodeState::kUnknown;
   auto len{kDepthMaxMateLen};
 
@@ -191,7 +206,7 @@ std::pair<NodeState, MateLen> KomoringHeights::SearchMainLoop(Node& n) {
     const auto old_score = score_;
     const auto score = Score::Make(option_.score_method, result, n.IsRootOrNode());
 
-    if (monitor_.ShouldStop()) {
+    if (monitor_.ShouldStop() || (R != variant::Rule::standard && Threads.stop)) {
       break;
     }
 
@@ -235,6 +250,11 @@ std::pair<NodeState, MateLen> KomoringHeights::SearchMainLoop(Node& n) {
         if (tl_thread_id == 0) {
           best_moves_ = GetMatePath(n, len, true);
           const auto final_result = SearchResult::MakeFinal<true>(n.OrHand(), len - 1, result.Amount());
+          if constexpr (R != variant::Rule::standard) {
+            if (best_moves_.empty()) {
+              return {NodeState::kUnknown, len};
+            }
+          }
           pv_list_.Update(best_moves_[0], final_result, 0, best_moves_);
           score_ = old_score;
         }
@@ -253,7 +273,8 @@ std::pair<NodeState, MateLen> KomoringHeights::SearchMainLoop(Node& n) {
   return {node_state, len};
 }
 
-SearchResult KomoringHeights::SearchEntry(Node& n, MateLen len) {
+template <variant::Rule R>
+SearchResult KomoringHeightsFor<R>::SearchEntry(Node& n, MateLen len) {
   SearchResult result{};
   PnDn thpn = (len == kDepthMaxMateLen) ? tl_thread_id : kInfinitePnDn;
   PnDn thdn = (len == kDepthMaxMateLen) ? tl_thread_id : kInfinitePnDn;
@@ -297,7 +318,8 @@ SearchResult KomoringHeights::SearchEntry(Node& n, MateLen len) {
   return result;
 }
 
-SearchResult KomoringHeights::SearchImplForRoot(Node& n, PnDn thpn, PnDn thdn, MateLen len) {
+template <variant::Rule R>
+SearchResult KomoringHeightsFor<R>::SearchImplForRoot(Node& n, PnDn thpn, PnDn thdn, MateLen len) {
   // 実装内容は SearchImpl() とほぼ同様なので詳しいロジックについてはそちらも参照。
 
   const auto orig_thpn = thpn;
@@ -361,7 +383,8 @@ SearchResult KomoringHeights::SearchImplForRoot(Node& n, PnDn thpn, PnDn thdn, M
   return curr_result;
 }
 
-SearchResult KomoringHeights::SearchImpl(Node& n, PnDn thpn, PnDn thdn, MateLen len, std::uint32_t& inc_flag) {
+template <variant::Rule R>
+SearchResult KomoringHeightsFor<R>::SearchImpl(Node& n, PnDn thpn, PnDn thdn, MateLen len, std::uint32_t& inc_flag) {
   const PnDn orig_thpn = thpn;
   const PnDn orig_thdn = thdn;
   const std::uint32_t orig_inc_flag = inc_flag;
@@ -373,6 +396,10 @@ SearchResult KomoringHeights::SearchImpl(Node& n, PnDn thpn, PnDn thdn, MateLen 
   }
 
   if (n.GetDepth() >= kDepthMax) {
+    if constexpr (R != variant::Rule::standard) {
+      Threads.stop = true;
+      return SearchResult::MakeUnknown(kPnDnUnit, kPnDnUnit, len, 1, BitSet64::Full());
+    }
     return SearchResult::MakeRepetition(n.OrHand(), len, 1, 0);
   }
 
@@ -453,7 +480,8 @@ SearchResult KomoringHeights::SearchImpl(Node& n, PnDn thpn, PnDn thdn, MateLen 
   return curr_result;
 }
 
-std::vector<Move> KomoringHeights::GetMatePath(Node& n, MateLen len, bool exact) {
+template <variant::Rule R>
+std::vector<Move> KomoringHeightsFor<R>::GetMatePath(Node& n, MateLen len, bool exact) {
   std::vector<Move> best_moves;
   pv_search_ = true;
   while (len.Len() > 0) {
@@ -472,6 +500,11 @@ std::vector<Move> KomoringHeights::GetMatePath(Node& n, MateLen len, bool exact)
     if (best_move == MOVE_NONE) {
       break;
     }
+    if constexpr (R != variant::Rule::standard) {
+      if (n.IsRepetitionAfter(best_move)) {
+        break;
+      }
+    }
 
     len = next_len;
     n.DoMove(best_move);
@@ -483,7 +516,8 @@ std::vector<Move> KomoringHeights::GetMatePath(Node& n, MateLen len, bool exact)
   return best_moves;
 }
 
-std::pair<Move, MateLen> KomoringHeights::GetBestMoveOrNode(Node& n, MateLen len, bool exact) {
+template <variant::Rule R>
+std::pair<Move, MateLen> KomoringHeightsFor<R>::GetBestMoveOrNode(Node& n, MateLen len, bool exact) {
   KOMORI_PRECONDITION(n.IsOrNode());
   if (!exact) {
     const auto [move, proven_len] = LookUpBestMoveOrNode(tt_, n);
@@ -508,7 +542,8 @@ std::pair<Move, MateLen> KomoringHeights::GetBestMoveOrNode(Node& n, MateLen len
   return {move, result.Len()};
 }
 
-std::pair<Move, MateLen> KomoringHeights::GetBestMoveAndNode(Node& n, MateLen len, bool exact) {
+template <variant::Rule R>
+std::pair<Move, MateLen> KomoringHeightsFor<R>::GetBestMoveAndNode(Node& n, MateLen len, bool exact) {
   KOMORI_PRECONDITION(!n.IsOrNode());
   if (exact) {
     auto& expansion = expansion_list_[tl_thread_id].Emplace(tt_, n, len - 2, true, BitSet64::Full(), option_.multi_pv);
@@ -545,7 +580,8 @@ std::pair<Move, MateLen> KomoringHeights::GetBestMoveAndNode(Node& n, MateLen le
   }
 }
 
-void KomoringHeights::UpdateFinalPv(Node& n, Move move, const SearchResult& result) {
+template <variant::Rule R>
+void KomoringHeightsFor<R>::UpdateFinalPv(Node& n, Move move, const SearchResult& result) {
   if (result.Pn() == 0) {
     std::vector<Move> pv{move};
     n.DoMove(move);
@@ -571,7 +607,8 @@ void KomoringHeights::UpdateFinalPv(Node& n, Move move, const SearchResult& resu
   }
 }
 
-UsiInfo KomoringHeights::CurrentInfo() const {
+template <variant::Rule R>
+UsiInfo KomoringHeightsFor<R>::CurrentInfo() const {
   UsiInfo usi_output = monitor_.GetInfo();
   usi_output.Set(UsiInfoKey::kHashfull, tt_.Hashfull());
   usi_output.Set(UsiInfoKey::kScore, score_.ToString());
@@ -579,13 +616,15 @@ UsiInfo KomoringHeights::CurrentInfo() const {
   return usi_output;
 }
 
-void KomoringHeights::Print(const Node& n) {
+template <variant::Rule R>
+void KomoringHeightsFor<R>::Print(const Node& n) {
   if (option_.silent) {
     return;
   }
 
   auto usi_output = CurrentInfo();
-  if (!expansion_list_[0].IsEmpty() && !pv_search_) {
+  if (!expansion_list_[0].IsEmpty() && !pv_search_ &&
+      (R == variant::Rule::standard || !expansion_list_[0].Root().empty())) {
     // 探索中なら現在の探索情報で pv_list_ を更新する
     const auto& root = expansion_list_[0].Root();
     const auto result = root.FrontResult();
@@ -616,4 +655,21 @@ void KomoringHeights::Print(const Node& n) {
 
   sync_cout << usi_output << sync_endl;
 }
+#if defined(KOMORI_FIXED_RULE)
+template class KomoringHeightsFor<variant::kDefaultRule>;
+#else
+template class KomoringHeightsFor<variant::Rule::standard>;
+template class KomoringHeightsFor<variant::Rule::annan>;
+template class KomoringHeightsFor<variant::Rule::anhoku>;
+template class KomoringHeightsFor<variant::Rule::antouzai>;
+template class KomoringHeightsFor<variant::Rule::taimen>;
+template class KomoringHeightsFor<variant::Rule::haimen>;
+template class KomoringHeightsFor<variant::Rule::anki>;
+template class KomoringHeightsFor<variant::Rule::tenjiku>;
+template class KomoringHeightsFor<variant::Rule::neko>;
+template class KomoringHeightsFor<variant::Rule::nekoneko>;
+template class KomoringHeightsFor<variant::Rule::yokoneko>;
+template class KomoringHeightsFor<variant::Rule::yokonekoneko>;
+template class KomoringHeightsFor<variant::Rule::tenkyo>;
+#endif
 }  // namespace komori

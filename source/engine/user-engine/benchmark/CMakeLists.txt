@@ -5,7 +5,7 @@ project(kh_benchmark)
 set(CMAKE_CXX_STANDARD 17)
 
 add_compile_options(-fno-exceptions -fno-rtti -Wall -Wextra -fpermissive)
-add_compile_definitions(UNICODE NO_EXCEPTIONS TARGET_CPU="M1" USER_ENGINE)
+add_compile_definitions(UNICODE NO_EXCEPTIONS TARGET_CPU="M1" USER_ENGINE KOMORI_FIXED_RULE=standard)
 
 add_subdirectory(../../../../third-party/benchmark benchmark)
 

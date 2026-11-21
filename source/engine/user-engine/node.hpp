@@ -14,6 +14,7 @@
 #include "hands.hpp"
 #include "path_keys.hpp"
 #include "typedefs.hpp"
+#include "variant_rules.hpp"
 #include "visit_history.hpp"
 
 namespace komori {
@@ -34,7 +35,8 @@ namespace komori {
  * @note このクラスでは、`Position` を参照として保持する。よって、クラス外で `Position` を書き換えると
  * `Node` の内部状態も狂ってしまうので注意すること。
  */
-class Node {
+template <variant::Rule R>
+class NodeFor {
  public:
   /**
    * @brief コンストラクタ
@@ -43,23 +45,23 @@ class Node {
    * @param path_key  開始局面の path key。この値を基準に子局面の path key を差分計算する
    * @param depth     開始局面の探索深さ
    */
-  explicit Node(Position& n, bool or_node, Key path_key = 0, Depth depth = 0)
+  explicit NodeFor(Position& n, bool or_node, Key path_key = 0, Depth depth = 0)
       : n_{std::ref(n)},
         or_color_{or_node ? n.side_to_move() : ~n.side_to_move()},
         depth_{depth},
         path_key_{path_key} {}
   /// Default constructor(delete)
-  Node() = delete;
+  NodeFor() = delete;
   /// Copy constructor(delete)
-  Node(const Node&) = delete;
+  NodeFor(const NodeFor&) = delete;
   /// Move constructor(default)
-  Node(Node&&) noexcept = default;
+  NodeFor(NodeFor&&) noexcept = default;
   /// Copy assign operator(delete)
-  Node& operator=(const Node&) = delete;
+  NodeFor& operator=(const NodeFor&) = delete;
   /// Move assign operator(delete)
-  Node& operator=(Node&&) noexcept = default;
+  NodeFor& operator=(NodeFor&&) noexcept = default;
   /// Destructor(default)
-  ~Node() = default;
+  ~NodeFor() = default;
 
   /// このクラスが保持する `Position` への参照
   Position& Pos() { return n_.get(); }
@@ -90,7 +92,13 @@ class Node {
   /// 現在のハッシュ値
   Key GetKey() const { return Pos().key(); }
   /// 現在の盤面ハッシュ値
-  Key BoardKey() const { return Pos().state()->board_key(); }
+  Key BoardKey() const {
+    if constexpr (R == variant::Rule::standard) {
+      return Pos().state()->board_key();
+    } else {
+      return Pos().key() ^ RuleKey();
+    }
+  }
   /// 現在の経路ハッシュ値
   Key GetPathKey() const { return path_key_; }
   /// 盤面ハッシュ値と攻め方の持ち駒を同時に取得する
@@ -110,7 +118,13 @@ class Node {
   /// `move` 後のハッシュ値
   Key KeyAfter(Move move) const { return Pos().key_after(move); }
   /// `move` 後の盤面ハッシュ値
-  Key BoardKeyAfter(Move move) const { return Pos().board_key_after(move); }
+  Key BoardKeyAfter(Move move) const {
+    if constexpr (R == variant::Rule::standard) {
+      return Pos().board_key_after(move);
+    } else {
+      return Pos().key_after(move) ^ RuleKey();
+    }
+  }
   /// `move` 後の経路ハッシュ値
   Key PathKeyAfter(Move move) const { return ::komori::PathKeyAfter(path_key_, move, depth_); }
   /// `move` 後の攻め方の持ち駒
@@ -131,7 +145,7 @@ class Node {
     visit_history_.Visit(BoardKey(), this->OrHand(), depth_);
 
     st_info_.Push(StateInfo{});
-    Pos().do_move(move, st_info_.back());
+    variant::DoMove<R>(Pos(), move, st_info_.back());
     depth_++;
   }
 
@@ -156,18 +170,34 @@ class Node {
   }
 
   /// 現局面が千日手または劣等局面か
-  std::optional<Depth> IsRepetitionOrInferior() const { return visit_history_.IsInferior(BoardKey(), this->OrHand()); }
+  std::optional<Depth> IsRepetitionOrInferior() const {
+    if constexpr (R != variant::Rule::standard) {
+      return IsRepetition();
+    }
+    return visit_history_.IsInferior(BoardKey(), OrHand());
+  }
 
   /// `move` をすると千日手または劣等局面になるかどうか
   std::optional<Depth> IsRepetitionOrInferiorAfter(Move move) const {
+    if constexpr (R != variant::Rule::standard) {
+      return IsRepetitionAfter(move);
+    }
     return visit_history_.IsInferior(BoardKeyAfter(move), this->OrHandAfter(move));
   }
 
   /// 現局面が千日手または優等局面か
-  std::optional<Depth> IsRepetitionOrSuperior() const { return visit_history_.IsSuperior(BoardKey(), this->OrHand()); }
+  std::optional<Depth> IsRepetitionOrSuperior() const {
+    if constexpr (R != variant::Rule::standard) {
+      return IsRepetition();
+    }
+    return visit_history_.IsSuperior(BoardKey(), OrHand());
+  }
 
   /// `move` をすると千日手または優等局面になるかどうか
   std::optional<Depth> IsRepetitionOrSuperiorAfter(Move move) const {
+    if constexpr (R != variant::Rule::standard) {
+      return IsRepetitionAfter(move);
+    }
     return visit_history_.IsSuperior(BoardKeyAfter(move), this->OrHandAfter(move));
   }
 
@@ -184,6 +214,10 @@ class Node {
   }
 
  private:
+  Key RuleKey() const {
+    return UINT64_C(0x9e3779b97f4a7c15) * (2 * static_cast<unsigned>(R) + or_color_);
+  }
+
   /// `move` 直前の経路ハッシュ値
   Key PathKeyBefore(Move move) const { return ::komori::PathKeyBefore(path_key_, move, depth_); }
 
@@ -197,15 +231,19 @@ class Node {
   Key path_key_{};                                  ///< 経路ハッシュ値。差分計算により求める。
 };
 
+using Node = NodeFor<variant::Rule::standard>;
+
 /// 局面 n から moves で手を一気に進める。nに対し、moves の前から順に n.DoMove(m) を適用する。
-inline void RollForward(Node& n, const std::vector<Move>& moves) {
+template <variant::Rule R>
+inline void RollForward(NodeFor<R>& n, const std::vector<Move>& moves) {
   for (const auto& move : moves) {
     n.DoMove(move);
   }
 }
 
 /// 局面 n から moves で手を一気に戻す。n に対し、moves の後ろから順に n.UndoMove(m) を適用する。
-inline void RollBack(Node& n, const std::vector<Move>& moves) {
+template <variant::Rule R>
+inline void RollBack(NodeFor<R>& n, const std::vector<Move>& moves) {
   for (auto itr = moves.crbegin(); itr != moves.crend(); ++itr) {
     n.UndoMove();
   }
@@ -229,6 +267,28 @@ inline std::pair<Move, Hand> CheckMate1Ply(Node& n) {
     }
   }
   return {MOVE_NONE, kNullHand};
+}
+
+template <variant::Rule R>
+inline std::pair<Move, Hand> CheckMate1Ply(NodeFor<R>& n) {
+  if (!n.IsOrNode()) {
+    return {MOVE_NONE, kNullHand};
+  }
+  const variant::Board board{n.Pos()};
+  Move mate = MOVE_NONE;
+  variant::Generate<R>(board, n.Us(), [&](Move move, Bitboard checkers) {
+    if (!checkers || n.IsRepetitionAfter(move)) {
+      return false;
+    }
+    auto after = board;
+    after.Play(n.Us(), move);
+    if (variant::HasLegalMove<R>(after, ~n.Us())) {
+      return false;
+    }
+    mate = move;
+    return true;
+  });
+  return {mate, mate == MOVE_NONE ? kNullHand : n.OrHand()};
 }
 }  // namespace komori
 #endif  // KOMORI_NODE_HPP_

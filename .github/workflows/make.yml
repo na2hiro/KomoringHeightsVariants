@@ -7,6 +7,15 @@ on:
   workflow_dispatch:
 
 jobs:
+  variant-usi:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build selectable rules
+        run: make -C source -j2 normal RULESET=all TARGET_CPU=SSE42 COMPILER=g++
+      - name: Run USI tests for all rules
+        run: python3 script/verify_variants.py source/KomoringHeights-by-gcc-all
+
   build-ubuntu:
     runs-on: ubuntu-22.04
 

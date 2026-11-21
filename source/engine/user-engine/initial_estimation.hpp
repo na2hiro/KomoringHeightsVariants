@@ -185,13 +185,19 @@ inline std::pair<PnDn, PnDn> InitialPnDn(const Node& n, Move move) {
 #endif  // !defined(USE_DEEP_DFPN)
 }
 
+template <variant::Rule R>
+inline std::pair<PnDn, PnDn> InitialPnDn(const NodeFor<R>&, Move) {
+  return {kPnDnUnit, kPnDnUnit};
+}
+
 /**
  * @brief 局面 n の手 move に対するざっくりとした評価値を返す。
  *
  * 値が小さければ小さいほど（手番側にとって）良い手を表す。
  * MovePicker において指し手のオーダリングをする際に使う。
  */
-inline int MoveBriefEvaluation(const Node& n, Move move) {
+template <variant::Rule R>
+inline int MoveBriefEvaluation(const NodeFor<R>& n, Move move) {
   auto us = n.Us();
   auto king_sq = n.KingSquare();
   auto to = to_sq(move);
