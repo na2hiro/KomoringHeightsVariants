@@ -35,7 +35,8 @@ jobs:
         cd lcov-1.16
         sudo make install
 
-        pip install pre-commit cpplint coverxygen
+        # Coverxygen 1.8.2 crashes while processing enum values.
+        pip install pre-commit cpplint 'coverxygen<1.8'
         sudo apt-get update && sudo apt-get install doxygen graphviz
 
     - name: run pre-commit

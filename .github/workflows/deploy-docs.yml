@@ -24,7 +24,8 @@ jobs:
         cd lcov-1.16
         sudo make install
 
-        pip install pre-commit coverxygen
+        # Coverxygen 1.8.2 crashes while processing enum values.
+        pip install pre-commit 'coverxygen<1.8'
         sudo apt-get update && sudo apt-get -y install doxygen graphviz
 
     - name: Generate Documents
