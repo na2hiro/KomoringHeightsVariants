@@ -2,6 +2,9 @@
 
 #include "thread.h"
 #include "usi.h"
+#if defined(USER_ENGINE)
+#include "engine/user-engine/variant_usi.hpp"
+#endif
 
 ThreadPool Threads;		// Global object
 
@@ -158,6 +161,17 @@ void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
 	main()->ponder = ponderMode;
 	Search::Limits = limits;
 	Search::RootMoves rootMoves;
+	bool physical_only = false;
+#if defined(USER_ENGINE)
+	namespace variant_usi = komori::variant;
+	physical_only = variant_usi::ActiveRule() != variant_usi::Rule::standard;
+	if (physical_only) {
+		for (const auto move : variant_usi::LegalMoves(pos))
+			if (limits.searchmoves.empty() || std::count(limits.searchmoves.begin(), limits.searchmoves.end(), move))
+				rootMoves.emplace_back(move);
+	} else
+#endif
+	{
 
 	// 初期局面では合法手すべてを生成してそれをrootMovesに設定しておいてやる。
 	// このとき、歩の不成などの指し手は除く。(そのほうが勝率が上がるので)
@@ -185,6 +199,7 @@ void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
 			if (limits.searchmoves.empty()
 				|| std::count(limits.searchmoves.begin(), limits.searchmoves.end(), m))
 				rootMoves.emplace_back(m);
+	}
 	}
 
 	// After ownership transfer 'states' becomes empty, so if we stop the search
@@ -228,7 +243,7 @@ void ThreadPool::start_thinking(const Position& pos, StateListPtr& states ,
 		// ゆえにここに書くしかないのである。
 
 		th->rootMoves = rootMoves;
-		th->rootPos.set(sfen, &th->rootState,th);
+		th->rootPos.set(sfen, &th->rootState,th,physical_only);
 		th->rootState = setupStates->back();
 	}
 

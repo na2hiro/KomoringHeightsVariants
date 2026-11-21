@@ -21,6 +21,8 @@ For available engine options, please see [EngineOptions](source/engine/user-engi
 
 ## How to Build
 
+See [variant shogi](docs/variants.md) for the 12 movement-influence rules, build options, and a USI example.
+
 To build a binary from the source, use the following commands:
 
 ```sh

@@ -14,20 +14,23 @@ namespace komori {
  * 基本的には `std::stack<LocalExpansion>` のように振る舞う。`Emplace()` により新たな `LocalExpansion` を
  * 構築し、`Pop()` により構築したインスタンスのうち最も新しいものを消す。最新のインスタンスは `Current()` で取得できる。
  */
-class ExpansionStack {
+template <variant::Rule R>
+class ExpansionStackFor {
+  using LocalExpansion = LocalExpansionFor<R>;
+
  public:
   /// Default constructor(default)
-  ExpansionStack() = default;
+  ExpansionStackFor() = default;
   /// Copy constructor(delete)
-  ExpansionStack(const ExpansionStack&) = delete;
+  ExpansionStackFor(const ExpansionStackFor&) = delete;
   /// Move constructor(delete)
-  ExpansionStack(ExpansionStack&&) = delete;
+  ExpansionStackFor(ExpansionStackFor&&) = delete;
   /// Copy assign operator(delete)
-  ExpansionStack& operator=(const ExpansionStack&) = delete;
+  ExpansionStackFor& operator=(const ExpansionStackFor&) = delete;
   /// Move assign operator(delete)
-  ExpansionStack& operator=(ExpansionStack&&) = delete;
+  ExpansionStackFor& operator=(ExpansionStackFor&&) = delete;
   /// Destructor(default)
-  ~ExpansionStack() = default;
+  ~ExpansionStackFor() = default;
 
   /**
    * @brief スタックの先頭に `LocalExpansion` オブジェクトを構築する。
@@ -67,7 +70,7 @@ class ExpansionStack {
    * @param tt 置換表
    * @param n  現局面
    */
-  void EliminateDoubleCount(tt::TranspositionTable& tt, const Node& n) {
+  void EliminateDoubleCount(tt::TranspositionTableFor<R>& tt, const NodeFor<R>& n) {
     const auto& current = Current();
     if (current.empty()) {
       return;
@@ -97,6 +100,7 @@ class ExpansionStack {
    */
   std::deque<LocalExpansion> list_;
 };
+using ExpansionStack = ExpansionStackFor<variant::Rule::standard>;
 }  // namespace komori
 
 #endif  // KOMORI_EXPANSION_STACK_HPP_

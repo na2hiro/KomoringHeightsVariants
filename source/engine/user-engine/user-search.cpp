@@ -2,11 +2,39 @@
 #include "path_keys.hpp"
 #include "thread_initialization.hpp"
 #include "typedefs.hpp"
+#include "variant_usi.hpp"
+
+#include <charconv>
 
 #if defined(USER_ENGINE)
 
 namespace {
-komori::KomoringHeights g_searcher;
+using komori::variant::Rule;
+
+class Searcher {
+ public:
+  virtual ~Searcher() = default;
+  virtual void Init(const komori::EngineOption&, std::uint32_t) = 0;
+  virtual void NewSearch(const Position&, bool) = 0;
+  virtual komori::NodeState Search(const Position&, bool) = 0;
+  virtual const std::vector<Move>& BestMoves() const = 0;
+};
+
+template <Rule R>
+class RuleSearcher final : public Searcher {
+ public:
+  void Init(const komori::EngineOption& option, std::uint32_t threads) override { searcher_.Init(option, threads); }
+  void NewSearch(const Position& pos, bool attacker) override { searcher_.NewSearch(pos, attacker); }
+  komori::NodeState Search(const Position& pos, bool attacker) override { return searcher_.Search(pos, attacker); }
+  const std::vector<Move>& BestMoves() const override { return searcher_.BestMoves(); }
+
+ private:
+  komori::KomoringHeightsFor<R> searcher_;
+};
+
+std::unique_ptr<Searcher> g_searcher;
+Rule g_requested_rule = komori::variant::kDefaultRule;
+Rule g_active_rule = komori::variant::kDefaultRule;
 komori::EngineOption g_option;
 std::atomic_bool g_path_key_init_flag;
 
@@ -51,7 +79,149 @@ void PrintResult(bool is_mate_search, LoseKind kind, const std::string& pv_moves
     // `KomoringHeights::Search()` 内で出力しているはずなので、ここでは何もする必要がない。
   }
 }
+
+bool IsValidVariantSfen(const std::string& sfen) {
+  std::istringstream input{sfen};
+  std::string board, turn, hands, ply, extra;
+  if (!(input >> board >> turn >> hands >> ply) || (input >> extra) || (turn != "b" && turn != "w")) {
+    return false;
+  }
+  unsigned move_number = 0;
+  const auto parsed = std::from_chars(ply.data(), ply.data() + ply.size(), move_number);
+  if (parsed.ec != std::errc{} || parsed.ptr != ply.data() + ply.size() || move_number == 0 ||
+      move_number > INT_MAX - MAX_PLY - komori::kDepthMax) {
+    return false;
+  }
+
+  constexpr int inventory[] = {0, 18, 4, 4, 4, 2, 2, 4};
+  int pieces[PIECE_HAND_NB]{};
+  int kings[COLOR_NB]{};
+  int files = 0;
+  int ranks = 1;
+  bool promoted = false;
+  for (const char ch : board) {
+    if (ch == '/' && !promoted && files == FILE_NB && ranks < RANK_NB) {
+      files = 0;
+      ++ranks;
+    } else if (ch >= '1' && ch <= '9' && !promoted) {
+      files += ch - '0';
+    } else if (ch == '+' && !promoted) {
+      promoted = true;
+    } else {
+      const auto index = PieceToCharBW.find(ch);
+      if (index == std::string::npos) {
+        return false;
+      }
+      const auto pc = static_cast<Piece>(index);
+      const auto pt = type_of(pc);
+      if (pt < PAWN || pt > KING || (promoted && pt > ROOK)) {
+        return false;
+      }
+      if (pt == KING) {
+        if (++kings[color_of(pc)] > 1) {
+          return false;
+        }
+      } else if (++pieces[pt] > inventory[pt]) {
+        return false;
+      }
+      ++files;
+      promoted = false;
+    }
+    if (files > FILE_NB) {
+      return false;
+    }
+  }
+  if (files != FILE_NB || ranks != RANK_NB || promoted || kings[BLACK] + kings[WHITE] == 0) {
+    return false;
+  }
+  if (hands == "-") {
+    return true;
+  }
+  int count = 0;
+  for (const char ch : hands) {
+    if (ch >= '0' && ch <= '9') {
+      count = 10 * count + ch - '0';
+      if (count == 0 || count > 18) {
+        return false;
+      }
+      continue;
+    }
+    const auto index = PieceToCharBW.find(ch);
+    if (index == std::string::npos) {
+      return false;
+    }
+    const auto pt = type_of(static_cast<Piece>(index));
+    if (pt < PAWN || pt >= PIECE_HAND_NB) {
+      return false;
+    }
+    pieces[pt] += std::max(1, count);
+    if (pieces[pt] > inventory[pt]) {
+      return false;
+    }
+    count = 0;
+  }
+  return count == 0;
+}
 }  // namespace
+
+namespace komori::variant {
+
+Rule ActiveRule() {
+  return g_active_rule;
+}
+bool RuleChangePending() {
+  return g_active_rule != g_requested_rule;
+}
+
+bool SetPosition(Position& pos, StateInfo& state, Thread* thread, const std::string& sfen) {
+  if (g_active_rule != Rule::standard && !IsValidVariantSfen(sfen)) {
+    return false;
+  }
+  pos.set(sfen, &state, thread, g_active_rule != Rule::standard);
+  return Dispatch(g_active_rule, [&](auto rule) {
+    if constexpr (rule() != Rule::standard) {
+      const Board board{pos};
+      if (Checkers<rule()>(board, ~pos.side_to_move())) {
+        return false;
+      }
+      state.checkersBB = Checkers<rule()>(board, pos.side_to_move());
+    }
+    return true;
+  });
+}
+
+Move ParseMove(const Position& pos, const std::string& token, Bitboard* checkers) {
+  if (token.size() != 4 && (token.size() != 5 || token[4] != '+' || token[1] == '*')) {
+    return MOVE_NONE;
+  }
+  const auto move = pos.to_move(USI::to_move16(token));
+  return Dispatch(g_active_rule, [&](auto rule) {
+    if constexpr (rule() != Rule::standard) {
+      if (const auto legal = TryMove<rule()>(pos, move)) {
+        if (checkers) {
+          *checkers = *legal;
+        }
+        return move;
+      }
+    }
+    return MOVE_NONE;
+  });
+}
+
+std::vector<Move> LegalMoves(const Position& pos) {
+  return Dispatch(g_active_rule, [&](auto rule) {
+    std::vector<Move> moves;
+    if constexpr (rule() != Rule::standard) {
+      Generate<rule()>(Board{pos}, pos.side_to_move(), [&](Move move, Bitboard) {
+        moves.push_back(move);
+        return false;
+      });
+    }
+    return moves;
+  });
+}
+
+}  // namespace komori::variant
 
 // USI拡張コマンド"user"が送られてくるとこの関数が呼び出される。実験に使ってください。
 void user_test(Position& pos, std::istringstream& is) {}
@@ -60,6 +230,22 @@ void user_test(Position& pos, std::istringstream& is) {}
 // USI::init()のなかからコールバックされる。
 void USI::extra_option(USI::OptionsMap& o) {
   komori::EngineOption::Init(o);
+#if !defined(KOMORI_FIXED_RULE)
+  std::vector<std::string> names;
+  for (const auto& info : komori::variant::kRules) {
+    names.emplace_back(info.name);
+  }
+  o["RuleSet"] << USI::Option(names, "standard", [](const USI::Option& option) {
+    const auto name = static_cast<std::string>(option);
+    for (const auto& info : komori::variant::kRules) {
+      if (info.name == name) {
+        g_requested_rule = info.rule;
+        return;
+      }
+    }
+    sync_cout << "info string Unknown RuleSet " << name << sync_endl;
+  });
+#endif
 }
 
 // 起動時に呼び出される。時間のかからない探索関係の初期化処理はここに書くこと。
@@ -82,7 +268,12 @@ void Search::clear() {
   komori::DeepDfpnInit(d, e);
 #endif  // defined(USE_DEEP_DFPN)
 
-  g_searcher.Init(g_option, Threads.size());
+  if (!g_searcher || komori::variant::RuleChangePending()) {
+    g_active_rule = g_requested_rule;
+    g_searcher = komori::variant::Dispatch(
+        g_active_rule, [](auto rule) -> std::unique_ptr<Searcher> { return std::make_unique<RuleSearcher<rule()>>(); });
+  }
+  g_searcher->Init(g_option, Threads.size());
 }
 
 // 探索開始時に呼び出される。
@@ -93,7 +284,7 @@ void MainThread::search() {
   const bool is_mate_search = Search::Limits.mate != 0;
   const bool is_root_or_node = IsPosOrNode(rootPos);
 
-  g_searcher.NewSearch(rootPos, is_root_or_node);
+  g_searcher->NewSearch(rootPos, is_root_or_node);
   Threads.start_searching();
   Thread::search();
   Threads.stop = true;
@@ -101,7 +292,7 @@ void MainThread::search() {
 
   Move best_move = MOVE_NONE;
   if (g_search_result == komori::NodeState::kProven) {
-    auto best_moves = g_searcher.BestMoves();
+    auto best_moves = g_searcher->BestMoves();
     PrintResult(is_mate_search, LoseKind::kMate, komori::ToString(best_moves));
 
     if (!best_moves.empty()) {
@@ -132,7 +323,7 @@ void MainThread::search() {
 // 探索本体。並列化している場合、ここがslaveのエントリーポイント。
 void Thread::search() {
   komori::InitializeThread(id(), Threads.size());
-  const auto result = g_searcher.Search(rootPos, IsPosOrNode(rootPos));
+  const auto result = g_searcher->Search(rootPos, IsPosOrNode(rootPos));
   if (id() == 0) {
     g_search_result = result;
   }

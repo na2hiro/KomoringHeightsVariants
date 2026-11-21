@@ -52,7 +52,8 @@ inline void InitializeTTNoise(std::uint32_t thread_id) {
  * 2. 優等局面（盤面が一致していて持ち駒が現局面より多い）
  * 3. 劣等局面（盤面が一致していて持ち駒が現局面より少ない）
  */
-class Query {
+template <bool kExact>
+class QueryFor {
  public:
   /**
    * @brief Query の構築を行う。
@@ -63,12 +64,12 @@ class Query {
    * @param hand        持ち駒
    * @param depth       探索深さ
    */
-  constexpr Query(RepetitionTable& rep_table,
-                  CircularEntryPointer initial_entry_pointer,
-                  Key path_key,
-                  Key board_key,
-                  Hand hand,
-                  Depth depth)
+  constexpr QueryFor(RepetitionTable& rep_table,
+                     CircularEntryPointer initial_entry_pointer,
+                     Key path_key,
+                     Key board_key,
+                     Hand hand,
+                     Depth depth)
       : rep_table_{&rep_table},
         initial_entry_pointer_{initial_entry_pointer},
         path_key_{path_key},
@@ -83,17 +84,17 @@ class Query {
    * 配列で領域を確保したいためデフォルトコンストラクト可能にしておく。デフォルトコンストラクト状態では
    * メンバ関数の呼び出しは完全に禁止である。そのため、使用する前に必ず引数つきのコンストラクタで初期化を行うこと。
    */
-  Query() = default;
+  QueryFor() = default;
   /// Copy constructor(delete). 使うことはないと思われるので封じておく。
-  Query(const Query&) = delete;
+  QueryFor(const QueryFor&) = delete;
   /// Move constructor(default)
-  constexpr Query(Query&&) noexcept = delete;
+  constexpr QueryFor(QueryFor&&) noexcept = delete;
   /// Copy assign operator(delete)
-  Query& operator=(const Query&) = delete;
+  QueryFor& operator=(const QueryFor&) = delete;
   /// Move assign operator(default)
-  constexpr Query& operator=(Query&&) noexcept = default;
+  constexpr QueryFor& operator=(QueryFor&&) noexcept = default;
   /// Destructor
-  ~Query() noexcept = default;
+  ~QueryFor() noexcept = default;
 
   /// 盤面ハッシュ値と持ち駒のペアを返す
   constexpr BoardKeyHandPair GetBoardKeyHandPair() const noexcept { return BoardKeyHandPair{board_key_, hand_}; }
@@ -127,7 +128,7 @@ class Query {
       std::shared_lock lock(*itr);
       // 本来は lock 後にも !itr->Null() のチェックが必要だが、itr->Hand() == kNullHand のとき itr->LookUp() が必ず
       // 失敗するので、このタイミングでのチェックは省略できる。
-      if (itr->IsFor(board_key_)) {
+      if (Matches(*itr)) {
         if (itr->LookUp(hand_, depth_, len, pn, dn, does_have_old_child)) {
           amount = std::max(amount, itr->Amount());
           if (pn == 0) {
@@ -185,7 +186,7 @@ class Query {
     Hand parent_hand = kNullHand;
     for (auto itr = initial_entry_pointer_; !itr->IsNull(); ++itr) {
       const std::shared_lock lock(*itr);
-      if (itr->IsFor(board_key_)) {
+      if (Matches(*itr)) {
         itr->UpdateParentCandidate(hand_, pn, dn, parent_board_key, parent_hand);
       }
     }
@@ -211,7 +212,7 @@ class Query {
     for (auto itr = initial_entry_pointer_; !itr->IsNull(); ++itr) {
       const std::shared_lock lock(*itr);
 
-      if (itr->IsFor(board_key_)) {
+      if (Matches(*itr)) {
         itr->UpdateFinalRange(hand_, disproven_len, proven_len);
 
         if (itr->IsFor(board_key_, hand_) && itr->IsPossibleRepetition()) {
@@ -247,6 +248,13 @@ class Query {
   }
 
  private:
+  bool Matches(const Entry& entry) const noexcept {
+    if constexpr (kExact) {
+      return entry.IsFor(board_key_, hand_);
+    }
+    return entry.IsFor(board_key_);
+  }
+
   /**
    * @brief 置換表に `hand` に一致するエントリがあればそれを返し、なければ作って返す
    * @param hand 持ち駒
@@ -282,7 +290,7 @@ class Query {
    */
   template <bool kIsProven>
   void SetFinal(const SearchResult& result) const noexcept {
-    const auto hand = result.GetFinalData().hand;
+    const auto hand = kExact ? hand_ : result.GetFinalData().hand;
     auto* const entry = FindOrCreate(hand);
     const auto len = result.Len();
     const auto amount = result.Amount();
@@ -331,6 +339,8 @@ class Query {
   Depth depth_;                                 ///< 現局面の探索深さ
   mutable Entry* cached_entry_;                 ///< 前回アクセスしたエントリ
 };
+using Query = QueryFor<false>;
+using ExactQuery = QueryFor<true>;
 }  // namespace komori::tt
 
 #endif  // KOMORI_TTQUERY_HPP_

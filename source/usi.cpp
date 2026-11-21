@@ -5,11 +5,23 @@
 #include "thread.h"
 #include "tt.h"
 #include "testcmd/unit_test.h"
+#if defined(USER_ENGINE)
+#include "engine/user-engine/variant_usi.hpp"
+#endif
 
 #include <sstream>
 #include <queue>
 
 using namespace std;
+
+#if defined(USER_ENGINE)
+namespace variant_usi = komori::variant;
+namespace {
+bool variant_position_valid = false;
+
+bool using_variant() { return variant_usi::ActiveRule() != variant_usi::Rule::standard; }
+}  // namespace
+#endif
 
 // ----------------------------------
 //      USI拡張コマンド "test"
@@ -313,6 +325,10 @@ u64 eval_sum;
 // 局面は初期化されないので注意。
 void is_ready(bool skipCorruptCheck)
 {
+#if defined(USER_ENGINE)
+	if (variant_usi::RuleChangePending())
+		Threads.stop = true;
+#endif
 	// EvalDirにある"eval_options.txt"を読み込む。
 	// ここに評価関数に応じた設定を書いておくことができる。
 
@@ -446,6 +462,9 @@ void is_ready_cmd(Position& pos, StateListPtr& states)
 	// "isready"が毎回来るようなので、"usinewgame"のほうは無視して、
 	// "isready"に応じて評価関数、定跡、探索部を初期化する。
 
+#if defined(USER_ENGINE)
+	const auto old_rule = variant_usi::ActiveRule();
+#endif
 	is_ready();
 
 	// Positionコマンドが送られてくるまで評価値の全計算をしていないの気持ち悪いのでisreadyコマンドに対して
@@ -453,7 +472,23 @@ void is_ready_cmd(Position& pos, StateListPtr& states)
 
 	// 新しく渡す局面なので古いものは捨てて新しいものを作る。
 	states = StateListPtr(new StateList(1));
+#if defined(USER_ENGINE)
+	if (using_variant()) {
+		const auto start = variant_usi::Startpos(variant_usi::ActiveRule());
+		variant_position_valid = variant_usi::SetPosition(pos, states->back(), Threads.main(), start);
+	} else
+#endif
 	pos.set_hirate(&states->back(),Threads.main());
+
+#if defined(USER_ENGINE)
+	if (using_variant() || old_rule != variant_usi::ActiveRule()) {
+		Threads.main()->last_position_cmd_string = "position startpos";
+		Threads.main()->last_go_cmd_string.clear();
+		Threads.main()->game_root_sfen = variant_usi::Startpos(variant_usi::ActiveRule());
+		Threads.main()->moves_from_game_root.clear();
+		Threads.main()->position_is_dirty = false;
+	}
+#endif
 
 	sync_cout << "readyok" << sync_endl;
 }
@@ -466,11 +501,33 @@ void position_cmd(Position& pos, istringstream& is , StateListPtr& states)
 
 	is >> token;
 
+#if defined(USER_ENGINE)
+	if (variant_usi::RuleChangePending()) {
+		sync_cout << "info string Send isready after changing RuleSet" << sync_endl;
+		return;
+	}
+	if (using_variant() && !USI::load_eval_finished) {
+		sync_cout << "info string Send isready before setting a variant position" << sync_endl;
+		return;
+	}
+#endif
 	if (token == "startpos")
 	{
 		// 初期局面として初期局面のFEN形式の入力が与えられたとみなして処理する。
 		sfen = SFEN_HIRATE;
-		is >> token; // もしあるなら"moves"トークンを消費する。
+#if defined(USER_ENGINE)
+		if (using_variant())
+			sfen = variant_usi::Startpos(variant_usi::ActiveRule());
+#endif
+		if (is >> token) { // もしあるなら"moves"トークンを消費する。
+#if defined(USER_ENGINE)
+			if (using_variant() && token != "moves") {
+				variant_position_valid = false;
+				sync_cout << "info string Expected moves after startpos" << sync_endl;
+				return;
+			}
+#endif
+		}
 	}
 	// 局面がfen形式で指定されているなら、その局面を読み込む。
 	// UCI(チェスプロトコル)ではなくUSI(将棋用プロトコル)だとここの文字列は"fen"ではなく"sfen"
@@ -483,6 +540,37 @@ void position_cmd(Position& pos, istringstream& is , StateListPtr& states)
 	}
 
 	// 新しく渡す局面なので古いものは捨てて新しいものを作る。
+#if defined(USER_ENGINE)
+	if (using_variant()) {
+		variant_position_valid = false;
+		auto new_states = std::make_unique<StateList>(1);
+		auto& initial = new_states->back();
+		const bool valid = variant_usi::SetPosition(pos, initial, Threads.main(), sfen);
+		if (pos.state() == &initial)
+			states = std::move(new_states);
+		if (!valid) {
+			sync_cout << "info string Invalid SFEN for RuleSet" << sync_endl;
+			return;
+		}
+		std::vector<Move> moves;
+		while (is >> token) {
+			Bitboard checkers;
+			m = variant_usi::ParseMove(pos, token, &checkers);
+			if (m == MOVE_NONE) {
+				sync_cout << "info string Illegal Input Move: " << token << sync_endl;
+				return;
+			}
+			states->emplace_back();
+			pos.do_move_with_checkers(m, states->back(), checkers);
+			moves.push_back(m);
+		}
+		Threads.main()->game_root_sfen = sfen;
+		Threads.main()->moves_from_game_root = std::move(moves);
+		Threads.main()->position_is_dirty = false;
+		variant_position_valid = true;
+		return;
+	}
+#endif
 	states = StateListPtr(new StateList(1));
 	pos.set(sfen , &states->back() , Threads.main());
 
@@ -569,6 +657,16 @@ void go_cmd(const Position& pos, istringstream& is , StateListPtr& states , bool
 		sync_cout << "Error! go cmd before isready cmd." << sync_endl;
 		return;
 	}
+
+#if defined(USER_ENGINE)
+	if (variant_usi::RuleChangePending() || (using_variant() && !variant_position_valid)) {
+		std::string mode;
+		is >> mode;
+		sync_cout << "info string Send isready and a valid position for RuleSet" << sync_endl;
+		sync_cout << (mode == "mate" ? "checkmate timeout" : "bestmove resign") << sync_endl;
+		return;
+	}
+#endif
 
 	Search::LimitsType limits;
 	string token;
@@ -969,6 +1067,15 @@ void USI::loop(int argc, char* argv[])
 
 		// この局面での指し手をすべて出力
 		else if (token == "moves") {
+#if defined(USER_ENGINE)
+			if (using_variant()) {
+				if (variant_position_valid)
+					for (const Move move : variant_usi::LegalMoves(pos))
+						cout << move << ' ';
+				cout << endl;
+				continue;
+			}
+#endif
 			for (auto m : MoveList<LEGAL_ALL>(pos))
 				cout << m.move << ' ';
 			cout << endl;
@@ -978,7 +1085,15 @@ void USI::loop(int argc, char* argv[])
 		else if (token == "side") cout << (pos.side_to_move() == BLACK ? "black":"white") << endl;
 
 		// この局面が詰んでいるかの判定
-		else if (token == "mated") cout << pos.is_mated() << endl;
+		else if (token == "mated") {
+#if defined(USER_ENGINE)
+			if (using_variant()) {
+				cout << (variant_position_valid && pos.in_check() && variant_usi::LegalMoves(pos).empty()) << endl;
+				continue;
+			}
+#endif
+			cout << pos.is_mated() << endl;
+		}
 
 		// この局面のhash keyの値を出力
 		else if (token == "key") cout << hex << pos.state()->key() << dec << endl;
@@ -1154,6 +1269,10 @@ std::string USI::move(const std::vector<Move>& moves)
 // また合法でない指し手の場合、エラーである旨を出力する。
 Move USI::to_move(const Position& pos, const std::string& str)
 {
+#if defined(USER_ENGINE)
+	if (using_variant())
+		return variant_usi::ParseMove(pos, str);
+#endif
 	// 全合法手のなかからusi文字列に変換したときにstrと一致する指し手を探してそれを返す
 	//for (const ExtMove& ms : MoveList<LEGAL_ALL>(pos))
 	//  if (str == move_to_usi(ms.move))

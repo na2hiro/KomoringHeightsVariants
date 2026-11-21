@@ -219,7 +219,7 @@ public:
 	// 局面を遡るために、rootまでの局面の情報が必要であるから、それを引数のsiで渡してやる。
 	// 遡る必要がない場合は、StateInfo si;に対して&siなどとして渡しておけば良い。
 	// 内部的にmemset(si,0,sizeof(StateInfo))として、この渡されたインスタンスをクリアしている。
-	void set(std::string sfen , StateInfo* si , Thread* th);
+	void set(std::string sfen , StateInfo* si , Thread* th, bool physical_only = false);
 
 	// 局面のsfen文字列を取得する
 	// ※ USIプロトコルにおいては不要な機能ではあるが、デバッグのために局面を標準出力に出力して
@@ -431,6 +431,9 @@ public:
 	// givesCheck = mの指し手によって王手になるかどうか。
 	// この呼出までにst.checkInfo.update(pos)が呼び出されている必要がある。
 	void do_move(Move m, StateInfo& newSt, bool givesCheck);
+#if defined(USER_ENGINE)
+	void do_move_with_checkers(Move m, StateInfo& newSt, Bitboard checkers);
+#endif
 
 	// do_move()の4パラメーター版のほうを呼び出すにはgivesCheckも渡さないといけないが、
 	// mで王手になるかどうかがわからないときはこちらの関数を用いる。
@@ -687,7 +690,7 @@ public:
 
 private:
 	// StateInfoの初期化(初期化するときに内部的に用いる)
-	void set_state(StateInfo* si) const;
+	void set_state(StateInfo* si, bool physical_only = false) const;
 
 	// 王手になるbitboard等を更新する。set_state()とdo_move()のときに自動的に行われる。
 	// null moveのときは利きの更新を少し端折れるのでフラグを渡すことに。
@@ -701,7 +704,7 @@ private:
 	}
 
 	// do_move()の先後分けたもの。内部的に呼び出される。
-	template <Color Us> void do_move_impl(Move m, StateInfo& st, bool givesCheck);
+	template <Color Us, typename Check> void do_move_impl(Move m, StateInfo& st, Check check);
 
 	// undo_move()の先後分けたもの。内部的に呼び出される。
 	template <Color Us> void undo_move_impl(Move m);

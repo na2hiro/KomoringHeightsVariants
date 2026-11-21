@@ -7,62 +7,29 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-ubuntu:
-    # ubuntu-latest = ubuntu-18.04 => ubuntu-20.04
-    # https://github.com/actions/virtual-environments/issues/1816
-    # https://docs.github.com/ja/free-pro-team@latest/actions/reference/specifications-for-github-hosted-runners
-    runs-on: macos-12
+  build-macos:
+    runs-on: ${{ matrix.os }}
 
     strategy:
       matrix:
-        edition:
-          - USER_ENGINE
-        compiler: [clang++-14, clang++-12, clang++-11]
-        target: ["normal"]
-        archcpu:
-          [
-            "AVX512,AVX2,SSE42,SSE2",
-            "SSE41,SSSE3,OTHER",
-          ]
-
         include:
-        - edition: USER_ENGINE
-          compiler: clang++-14
-          target: normal
-          archcpu: "M1"
+          - os: macos-15-intel
+            archcpu: "AVX512,AVX2,SSE42,SSE2"
+          - os: macos-15-intel
+            archcpu: "SSE41,SSSE3,OTHER"
+          - os: macos-15
+            archcpu: "M1"
 
     steps:
       - name: Checkout own repository
         uses: actions/checkout@v2
         with:
           path: main
-      - name: install clang-11
-        run: |
-          brew install llvm@11
-          ln -s /usr/local/opt/llvm@11/bin/clang++ /usr/local/bin/clang++-11
-          export LDFLAGS="-L/usr/local/opt/llvm@11/lib"
-          export CPPFLAGS="-I/usr/local/opt/llvm@11/include"
-        if: ${{ matrix.compiler == 'clang++-11' }}
-      - name: install clang-12
-        run: |
-          brew install llvm@12
-          ln -s /usr/local/opt/llvm@12/bin/clang++ /usr/local/bin/clang++-12
-          export LDFLAGS="-L/usr/local/opt/llvm@12/lib"
-          export CPPFLAGS="-I/usr/local/opt/llvm@12/include"
-        if: ${{ matrix.compiler == 'clang++-12' }}
-
-      - name: install clang-14
-        run: |
-          brew install llvm@14
-          ln -s /usr/local/opt/llvm@14/bin/clang++ /usr/local/bin/clang++-14
-          export LDFLAGS="-L/usr/local/opt/llvm@14/lib"
-          export CPPFLAGS="-I/usr/local/opt/llvm@14/include"
-        if: ${{ matrix.compiler == 'clang++-14' }}
 
       - name: make
-        run: ./main/script/build.sh -e ${{ matrix.edition }} -c ${{ matrix.compiler }} -t ${{ matrix.target }} -a ${{ matrix.archcpu }} -o mac
+        run: ./main/script/build.sh -e USER_ENGINE -c clang++ -t normal -a ${{ matrix.archcpu }} -o mac
 
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         with:
-          name: build-mac_${{ github.run_number }}_${{ github.sha }}
+          name: build-mac-${{ strategy.job-index }}-${{ github.run_attempt }}
           path: ./main/build/**/**/*

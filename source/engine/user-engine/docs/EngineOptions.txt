@@ -3,6 +3,12 @@ KomoringHeightsのオプション
 
 # 基本機能
 
+## RuleSet
+
+RULESET=all でビルドした場合に、詰探索に使うルールを選択する。既定値は standard（本将棋）。
+変更後は isready を送り、readyok を待ってから position で局面を設定する。
+ルール名はリポジトリの docs/variants.md を参照。
+
 ## USI_Hash
 
 置換表のために使用するメモリ量（MB）。128以上の値を推奨。

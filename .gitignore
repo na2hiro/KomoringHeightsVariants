@@ -51,6 +51,7 @@ build/
 bld/
 [Bb]in/
 [Oo]bj/
+/obj-*/
 exe/
 
 # Visual Studio 2015 cache/options directory
@@ -263,6 +264,7 @@ source/resource
 coverage-html/
 test_obj/
 debug_obj/
+/debug_obj-*/
 cov.info
 
 # Doxygen
@@ -274,3 +276,4 @@ comments.md
 
 compile_commands.json
 .cache/
+/script/__pycache__/

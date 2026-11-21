@@ -1,4 +1,4 @@
-# mainline windows build
+# mainline Windows build
 name: Make CI (MSYS2 for Windows)
 
 on:
@@ -8,63 +8,46 @@ on:
 
 jobs:
   build-msys2-windows:
-    # windows-latest = windows-2019
-    # https://docs.github.com/ja/actions/using-github-hosted-runners/about-github-hosted-runners
-    # https://github.com/actions/virtual-environments/blob/main/images/win/Windows2019-Readme.md
     runs-on: windows-latest
 
     strategy:
       matrix:
-        edition:
-          - USER_ENGINE
         compiler: [clang++, g++]
-        target: ["normal,tournament"]
         archcpu:
-          - "AVX512VNNI,AVXVNNI,AVX512,AVX2"
-          - "SSE42,SSE41,SSSE3"
-          - "SSE2,ZEN1,ZEN2,ZEN3"
-          - NO_SSE
-          - OTHER
-        exclude:
-          # 自動ビルドチェックから除外
-          # Build check exclude: archcpu ZEN3,AVXVNNI,OTHER
-          # `-march=cascadelake`: LLVM8, GCC9 support (AVX512VNNI)
-          # `-march=alderlake` : LLVM12, GCC11 support (AVX-VNNI)
-          # `-march=znver3`: LLVM12, GCC11 support
-          # https://llvm.org/docs/ReleaseNotes.html#changes-to-the-x86-target
-          # https://gcc.gnu.org/gcc-11/changes.html#x86
-          # https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html
-          # https://gcc.gnu.org/pipermail/gcc-patches/2020-October/556110.html
-          # https://twitter.com/herumi/status/1318418425295720448
-          - archcpu: OTHER
-          # NO_SSEではevallearn,gensfenビルドを除外
-          - target: evallearn
-            archcpu: NO_SSE
-          - target: gensfen
-            archcpu: NO_SSE
+          - "AVX512VNNI AVXVNNI AVX512 AVX2"
+          - "SSE42 SSE41 SSSE3"
+          - "SSE2 ZEN1 ZEN2 ZEN3"
 
     steps:
-      - name: Checkout own repository
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
         with:
-          path: main
+          msystem: UCRT64
+          update: true
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-lld
 
-      - name: Install pkg
+      - name: Build Windows binaries
+        shell: msys2 {0}
+        env:
+          COMPILER: ${{ matrix.compiler }}
+          CPU_TARGETS: ${{ matrix.archcpu }}
         run: |
-          $ErrorActionPreference = 'Continue'
-          C:\msys64\usr\bin\bash.exe -lc 'pacman --needed --noconfirm -Syuu'
-          C:\msys64\usr\bin\bash.exe -lc 'pacman --needed --noconfirm -Syuu'
-          C:\msys64\usr\bin\bash.exe -lc 'pacman --needed --noconfirm -Syuu pactoys'
-          C:\msys64\usr\bin\bash.exe -lc 'pacboy --needed --noconfirm -Sy clang:m lld:m openblas:x openmp:x toolchain:m base-devel:'
-          $ErrorActionPreference = 'Stop'
+          set -euo pipefail
+          mkdir -p build/windows
+          for cpu in $CPU_TARGETS; do
+            for target in normal tournament; do
+              name=KomoringHeights-${COMPILER}-${target}-${cpu}
+              make -C source -j2 "$target" OS=Windows_NT COMPILER="$COMPILER" TARGET_CPU="$cpu" \
+                OBJDIR="../obj-${name}" TARGET="../build/windows/${name}.exe"
+            done
+          done
 
-      - name: make
-        run: |
-          $env:PATH+=';C:\msys64';
-          .\main\script\msys2_build.ps1 -Edition ${{ matrix.edition }} -Compiler ${{ matrix.compiler }} -Target ${{ matrix.target }} -Cpu ${{ matrix.archcpu }}
-        shell: pwsh
-
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         with:
-          name: build-windows_${{ github.run_number }}_${{ github.sha }}
-          path: ./main/build/**/*
+          name: build-windows-${{ strategy.job-index }}-${{ github.run_attempt }}
+          path: build/windows/*.exe

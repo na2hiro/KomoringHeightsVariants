@@ -63,13 +63,14 @@ class PvList {
    * n における合法手によりリストを初期化する。初期状態では、すべての手の PV は {move}、探索結果は pn=∞/2, dn=∞/2
    * である。
    */
-  void NewSearch(const Node& n) {
+  template <variant::Rule R>
+  void NewSearch(const NodeFor<R>& n) {
     Clear();
 
     comparer_ = SearchResultComparer(n.IsOrNode());
     is_sorted_ = true;  // 初期状態はすべて同じ評価値なのでソートされた状態である。
 
-    MovePicker mp{n};
+    MovePickerFor<R> mp{n};
     pv_info_.reserve(mp.size());
     idx_.reserve(mp.size());
     for (const auto& [i_raw, move] : WithIndex(mp)) {

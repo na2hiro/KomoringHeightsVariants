@@ -9,8 +9,24 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.make-matrix.outputs.matrix }}
+      enabled: ${{ steps.credentials.outputs.enabled }}
     steps:
+      - name: Check for Google Drive test credentials
+        id: credentials
+        env:
+          SKICKA_TOKENCACHE_JSON: ${{ secrets.SKICKA_TOKENCACHE_JSON }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
+          if [[ -n "$SKICKA_TOKENCACHE_JSON" && -n "$GOOGLE_CLIENT_ID" && -n "$GOOGLE_CLIENT_SECRET" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Google Drive test credentials are unavailable. Skipping the private test corpus."
+          fi
+
       - name: Download from Google Drive
+        if: steps.credentials.outputs.enabled == 'true'
         uses: satackey/action-google-drive@v1
         with:
           skicka-tokencache-json: ${{ secrets.SKICKA_TOKENCACHE_JSON }}
@@ -21,13 +37,19 @@ jobs:
 
       - name: Make matrix
         id: make-matrix
+        if: steps.credentials.outputs.enabled == 'true'
         run: |
-          LIST=$(ls test-resources | jq -cnR '[inputs | select(length>0)]')
-          echo "::set-output name=matrix::${LIST}"
+          list=$(find test-resources -maxdepth 1 -type f -printf '%f\n' | sort | jq -cnR '[inputs | select(length>0)]')
+          if [[ "$list" == '[]' ]]; then
+            echo "::error::No test cases found in the Google Drive corpus."
+            exit 1
+          fi
+          echo "matrix=$list" >> "$GITHUB_OUTPUT"
 
   tests:
     runs-on: ubuntu-latest
     needs: prepare-matrix
+    if: needs.prepare-matrix.outputs.enabled == 'true'
     strategy:
       matrix:
         yaml: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
@@ -79,8 +101,15 @@ jobs:
   # This job is used for status check. It becomes success iff all of the above
   # jobs returned success.
   check:
-    runs-on: ubuntu-20.04
-    needs: tests
+    runs-on: ubuntu-latest
+    needs: [prepare-matrix, tests]
+    if: always()
     steps:
       - name: Check Build Status
-        run: echo 'Done'
+        env:
+          PREPARE_RESULT: ${{ needs.prepare-matrix.result }}
+          TEST_RESULT: ${{ needs.tests.result }}
+          ENABLED: ${{ needs.prepare-matrix.outputs.enabled }}
+        run: |
+          [[ "$PREPARE_RESULT" == success ]] &&
+            { [[ "$ENABLED" == false && "$TEST_RESULT" == skipped ]] || [[ "$TEST_RESULT" == success ]]; }

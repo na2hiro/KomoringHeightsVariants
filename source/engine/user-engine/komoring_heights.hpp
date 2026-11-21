@@ -19,20 +19,23 @@ namespace komori {
 /**
  * @brief 詰将棋探索の本体
  */
-class KomoringHeights {
+template <variant::Rule R>
+class KomoringHeightsFor {
+  using Node = NodeFor<R>;
+
  public:
   /// Default constructor(default)
-  KomoringHeights() = default;
+  KomoringHeightsFor() = default;
   /// Copy constructor(delete)
-  KomoringHeights(const KomoringHeights&) = delete;
+  KomoringHeightsFor(const KomoringHeightsFor&) = delete;
   /// Move constructor(delete)
-  KomoringHeights(KomoringHeights&&) = delete;
+  KomoringHeightsFor(KomoringHeightsFor&&) = delete;
   /// Copy assign operator(delete)
-  KomoringHeights& operator=(const KomoringHeights&) = delete;
+  KomoringHeightsFor& operator=(const KomoringHeightsFor&) = delete;
   /// Move assign operator(delete)
-  KomoringHeights& operator=(KomoringHeights&&) = delete;
+  KomoringHeightsFor& operator=(KomoringHeightsFor&&) = delete;
   /// Destructor(default)
-  ~KomoringHeights() = default;
+  ~KomoringHeightsFor() = default;
 
   /**
    * @brief エンジンを初期化する
@@ -162,18 +165,19 @@ class KomoringHeights {
    */
   void Print(const Node& n);
 
-  tt::TranspositionTable tt_;  ///< 置換表
-  EngineOption option_;        ///< エンジンオプション
-  bool pv_search_{false};      ///< 現在PV探索中かどうか
+  tt::TranspositionTableFor<R> tt_;  ///< 置換表
+  EngineOption option_;              ///< エンジンオプション
+  bool pv_search_{false};            ///< 現在PV探索中かどうか
 
   SearchMonitor monitor_;  ///< 探索モニター
 
-  std::vector<Move> best_moves_;                 ///< 詰み手順
-  std::deque<ExpansionStack> expansion_list_{};  ///< 局面展開のための一時領域
+  std::vector<Move> best_moves_;                       ///< 詰み手順
+  std::deque<ExpansionStackFor<R>> expansion_list_{};  ///< 局面展開のための一時領域
   Score score_{};  ///< 現在の探索評価値。余詰探索中に CurrentInfo() で取得できるようにここにおいておく
 
   PvList pv_list_;  ///< 各手に対する PV の一覧
 };
+using KomoringHeights = KomoringHeightsFor<variant::Rule::standard>;
 }  // namespace komori
 
 #endif  // KOMORI_KOMORING_HEIGHTS_HPP_
